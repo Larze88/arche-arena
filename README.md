@@ -10,6 +10,6 @@ Ein Auto-Battler mit Tieren für zwei Personen, angelehnt an Super Auto Pets. Be
 2. Den Einladungslink an die zweite Person schicken.
 3. Beide kaufen gleichzeitig Tiere und Futter ein, danach kämpfen die Teams automatisch.
 
-Die Browser verbinden sich direkt miteinander (WebRTC über [PeerJS](https://peerjs.com/)). Der kostenlose PeerJS-Server vermittelt nur den Verbindungsaufbau. Die Person, die das Spiel erstellt hat, muss die Seite offen lassen, weil ihr Browser die Kämpfe berechnet.
+Die Nachrichten laufen über öffentliche MQTT-Server (HiveMQ und EMQX, beide parallel), dadurch klappt die Verbindung in jedem Netz, auch im Mobilfunk. Kämpfe berechnet jedes Gerät selbst aus demselben Zufalls-Startwert. Die Person, die das Spiel erstellt hat, muss die Seite offen lassen, weil ihr Browser den Spielablauf steuert.
 
 Das ganze Spiel steckt in `index.html`, ohne Build-Schritt.

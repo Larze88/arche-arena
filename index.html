@@ -173,7 +173,7 @@ body{margin:0}[hidden]{display:none!important}
 <body>
 <div class="wrap" id="app"></div>
 <div id="toast" hidden></div>
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script>
 /* ---------- Daten ---------- */
 const TR={faint:'Ohnmacht',sell:'Verkauf',buy:'Kauf',sob:'Kampfstart',hurt:'Verletzt',beforeAtk:'Vor dem Angriff',endTurn:'Rundenende',startTurn:'Rundenstart',summoned:'Freund beschworen',levelup:'Levelaufstieg',aheadAtk:'Freund davor greift an',ko:'Gegner besiegt',aheadFaint:'Freund davor fällt',friendFaint:'Freund fällt',friendBought:'Freund gekauft'};
@@ -335,7 +335,7 @@ function runBattle(ta,tb){
   const atkVal=u=>{let d=u.a;if(u.perk==='bone')d+=3;if(u.perk==='steak'){d+=20;u.perk=null}return d};
 
   snap('Kampfbeginn!');
-  const sob=[...T[0],...T[1]].filter(u=>A[u.k].tr==='sob').sort((x,y)=>y.a-x.a||Math.random()-.5);
+  const sob=[...T[0],...T[1]].filter(u=>A[u.k].tr==='sob').map(u=>[u,Math.random()]).sort((x,y)=>y[0].a-x[0].a||x[1]-y[1]).map(p=>p[0]);
   for(const u of sob)if(u.h>0){fire(C[u.side],u,'sob');flush()}
   resolve();
   let turns=0;
@@ -485,113 +485,121 @@ function infoHTML(P){
     <p class="legend"><b class="a">3</b> Angriff <b class="h">4</b> Lebenspunkte · Am Desktop geht auch Ziehen und Ablegen.</p>`;
 }
 
-/* ---------- Netzwerk (PeerJS, direkt Browser zu Browser) ---------- */
-const PEER_PREFIX='arche-arena-v1-';
-const PEER_OPTS=window.ARCHE_PEER_OPTS||{}; // optional: eigener PeerJS-Server, z. B. {host:'…',port:443,path:'/'}
+/* ---------- Netzwerk (Weiterleitung über öffentliche MQTT-Server) ----------
+   Beide Geräte verbinden sich mit denselben Servern und tauschen kleine JSON-Nachrichten
+   über ein Thema aus, das nur aus dem Spielcode besteht. Kämpfe rechnet jedes Gerät selbst
+   mit demselben Zufalls-Startwert, deshalb gehen nur Teams und Ergebnisse über die Leitung. */
+const BROKERS=window.ARCHE_BROKERS||['wss://broker.hivemq.com:8884/mqtt','wss://broker.emqx.io:8084/mqtt'];
+const TOPIC='arche-arena/v2/';
 const params=new URLSearchParams(location.search);
-let peer=null,conn=null,retryT=null,netNote='',peerOk=false;
+let clients=[],netNote='',lastSeen=0,helloT=null,pingT=null,wasOnline=false;
+const seen=new Set();
+const myId=Math.random().toString(36).slice(2,10);
+let msgN=0;
 
 function fresh(){return{phase:'menu',role:null,me:0,code:null,uid:0,round:0,names:['',''],mode:'quick',lives:5,target:5,
-  score:[{lives:5,wins:0},{lives:5,wins:0}],P:null,myDone:false,oppDone:false,teams:[null,null],bt:null,nextReady:[false,false],myNext:false,winner:null}}
+  score:[{lives:5,wins:0},{lives:5,wins:0}],P:null,myDone:false,oppDone:false,teams:[null,null],bt:null,bin:null,nextReady:[false,false],myNext:false,winner:null}}
 function setMode(m){G.mode=m==='classic'?'classic':'quick';G.lives=G.target=G.mode==='quick'?5:10;G.score=[{lives:G.lives,wins:0},{lives:G.lives,wins:0}]}
-function save(){if(!G||!G.code)return;try{localStorage.setItem('arche-'+G.role+'-'+G.code,JSON.stringify(G))}catch(e){}}
+function save(){if(!G||!G.code)return;try{const{bt,...rest}=G;localStorage.setItem('arche-'+G.role+'-'+G.code,JSON.stringify(rest))}catch(e){}}
 function load(role,code){try{const s=localStorage.getItem('arche-'+role+'-'+code);return s?JSON.parse(s):null}catch(e){return null}}
 const makeCode=()=>Array.from({length:6},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random()*32)]).join('');
 const cleanCode=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,12);
 const shareLink=()=>location.origin+location.pathname+'?join='+G.code;
-const online=()=>!!(conn&&conn.open);
-function note(t){netNote=t;render()}
-function send(m){if(online())conn.send(m)}
+const serverUp=()=>clients.some(c=>c.connected);
+const online=()=>serverUp()&&Date.now()-lastSeen<15000;
+function note(t){if(netNote!==t){netNote=t;render()}}
 
-function openHost(){
-  peerOk=false;
-  peer=new Peer(PEER_PREFIX+G.code,PEER_OPTS);
-  peer.on('open',()=>{peerOk=true;netNote='';render()});
-  peer.on('connection',c=>{if(conn&&conn!==c)try{conn.close()}catch(e){}bindConn(c)});
-  peer.on('disconnected',()=>setTimeout(()=>{if(peer&&!peer.destroyed&&peer.disconnected)peer.reconnect()},2000));
-  peer.on('error',e=>{
-    if(e.type==='unavailable-id'){peer.destroy();note('Die Spiel-ID ist noch kurz belegt. Neuer Versuch in 3 Sekunden …');setTimeout(openHost,3000)}
-    else if(['network','server-error','socket-error','socket-closed'].includes(e.type))note('Keine Verbindung zum Vermittlungsserver. Prüfe dein Internet, es wird automatisch neu versucht.');
-    else note('Verbindungsfehler: '+e.type);
+function connectNet(){
+  if(typeof mqtt==='undefined'){note('Die Verbindungsbibliothek konnte nicht geladen werden. Prüfe dein Internet und lade die Seite neu.');return}
+  const mine=TOPIC+G.code+'/'+(G.role==='host'?'h':'g'),theirs=TOPIC+G.code+'/'+(G.role==='host'?'g':'h');
+  clients=BROKERS.map(url=>{
+    const c=mqtt.connect(url,{clientId:'arche_'+myId+'_'+Math.random().toString(36).slice(2,6),clean:true,reconnectPeriod:3000,connectTimeout:10000,keepalive:30});
+    c.myTopic=mine;
+    c.on('connect',()=>{c.subscribe(theirs,{qos:1});netNote='';greet();render()});
+    c.on('message',(t,buf)=>{let m;try{m=JSON.parse(buf.toString())}catch(e){return}receive(m)});
+    c.on('close',()=>{if(!serverUp())note('Keine Verbindung zum Server. Prüfe dein Internet, es wird automatisch neu versucht.')});
+    c.on('error',()=>{});
+    return c;
   });
+  clearInterval(pingT);
+  pingT=setInterval(()=>{send({t:'ping'});const on=online();if(on!==wasOnline){wasOnline=on;render()}},5000);
+  if(G.role==='guest'){clearInterval(helloT);helloT=setInterval(()=>{if(!online()||G.phase==='joining')greet()},4000)}
 }
-function openGuest(){
-  if(peer&&!peer.destroyed){if(peer.open)connectGuest();return}
-  peer=new Peer(PEER_OPTS);
-  peer.on('open',connectGuest);
-  peer.on('disconnected',()=>setTimeout(()=>{if(peer&&!peer.destroyed&&peer.disconnected)peer.reconnect()},2000));
-  peer.on('error',e=>{
-    if(e.type==='peer-unavailable')note('Das Spiel ist gerade nicht erreichbar. Hat die andere Person die Seite noch offen? Neuer Versuch läuft …');
-    else note('Verbindungsfehler: '+e.type+'. Neuer Versuch läuft …');
-    retry();
-  });
+function greet(){if(G.role==='guest')send({t:'hello',name:G.names[1]});else send({t:'hostUp'})}
+function send(m){
+  const s=JSON.stringify({...m,_id:myId+'-'+(++msgN)});
+  for(const c of clients)if(c.connected)c.publish(c.myTopic,s,{qos:1});
 }
-function connectGuest(){bindConn(peer.connect(PEER_PREFIX+G.code,{reliable:true}))}
-function retry(){clearTimeout(retryT);retryT=setTimeout(()=>{if(!online())openGuest()},4000)}
-function bindConn(c){
-  conn=c;
-  c.on('open',()=>{netNote='';if(G.role==='guest')send({t:'hello',name:G.names[1]});render()});
-  c.on('data',m=>{try{handle(m)}catch(err){console.error(err)}});
-  c.on('close',()=>{if(conn!==c)return;render();if(G.role==='guest')retry()});
-  c.on('error',()=>{});
+function receive(m){
+  if(!m||typeof m!=='object'||!m._id||seen.has(m._id))return;
+  seen.add(m._id);if(seen.size>500)seen.delete(seen.values().next().value);
+  lastSeen=Date.now();
+  if(!wasOnline){wasOnline=true;render()}
+  if(m.t==='ping')return;
+  try{handle(m)}catch(err){console.error(err)}
 }
 
 /* ---------- Nachrichten ---------- */
-function sanitizeTeam(team){
+function sanitizeTeam(team,pre){
   if(!Array.isArray(team))return[];
-  return team.slice(0,5).filter(u=>u&&A[u.k]).map((u,i)=>({id:'g'+G.round+'-'+i,k:u.k,a:clamp(+u.a||0),h:Math.max(1,clamp(+u.h||1)),
+  return team.slice(0,5).filter(u=>u&&A[u.k]).map((u,i)=>({id:pre+i,k:u.k,a:clamp(+u.a||0),h:Math.max(1,clamp(+u.h||1)),
     xp:Math.max(0,Math.min(5,+u.xp||0)),lvl:Math.max(1,Math.min(3,+u.lvl||1)),perk:FD[u.perk]&&FD[u.perk].perk?u.perk:null,
     ta:Math.max(0,Math.min(50,+u.ta||0)),th:Math.max(0,Math.min(50,+u.th||0))}));
 }
 function syncMsg(){return{t:'sync',names:G.names,mode:G.mode,round:G.round,score:G.score,hostDone:G.myDone,
-  guestDone:!!G.teams[1]||!!(G.bt&&G.bt.r===G.round),bt:G.bt&&G.bt.r===G.round?{...G.bt,i:0}:null}}
+  guestDone:!!G.teams[1]||!!(G.bin&&G.bin.r===G.round),bin:G.bin&&G.bin.r===G.round?G.bin:null}}
 function handle(m){
-  if(!m||typeof m!=='object')return;
   if(G.role==='host'){
     if(m.t==='hello'){
       G.names[1]=String(m.name||'Spieler 2').slice(0,16);
       if(G.phase==='lobby'){send({t:'start',names:G.names,mode:G.mode});beginRound(1);send({t:'round',r:1})}
       else send(syncMsg());
       render();
-    }else if(m.t==='team'&&m.r===G.round&&!G.teams[1]&&!(G.bt&&G.bt.r===G.round)){
-      G.teams[1]=sanitizeTeam(m.team);G.oppDone=true;maybeBattle();render();
+    }else if(m.t==='team'&&m.r===G.round&&!G.teams[1]&&!(G.bin&&G.bin.r===G.round)){
+      G.teams[1]=sanitizeTeam(m.team,'b');G.oppDone=true;maybeBattle();render();
     }else if(m.t==='next'&&m.r===G.round){G.nextReady[1]=true;maybeNext()}
   }else{
+    if(m.t==='hostUp'){greet();return}
     if(m.t==='start'){G.names=m.names;setMode(m.mode)}
     else if(m.t==='round')beginRound(m.r);
     else if(m.t==='oppDone'&&m.r===G.round){G.oppDone=true;render()}
-    else if(m.t==='battle')showBattle(m.bt,m.score);
+    else if(m.t==='battle')showBattle(m.bin,m.score);
     else if(m.t==='sync')applySync(m);
   }
 }
 function applySync(m){
   G.names=m.names;G.mode=m.mode;G.lives=G.target=m.mode==='quick'?5:10;G.score=m.score;
-  if(m.bt){if(!(G.bt&&G.bt.r===m.bt.r)){G.round=m.round;showBattle(m.bt,m.score)}else render();return}
+  if(m.bin){if(!(G.bin&&G.bin.r===m.bin.r)){G.round=m.round;showBattle(m.bin,m.score)}else{if(G.myNext)send({t:'next',r:G.round});render()}return}
   if(m.round>G.round||G.phase==='joining'||!G.P)beginRound(m.round,true);
   G.oppDone=m.hostDone;
   if(G.phase==='wait'&&!m.guestDone)send({t:'team',r:G.round,team:G.P.team});
   render();
 }
 
+/* ---------- Kampf mit gemeinsamem Startwert ---------- */
+function seeded(seed){let a=seed>>>0;return()=>{a=a+0x6D2B79F5>>>0;let t=a;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296}}
+function battleFrom(bin){
+  const orig=Math.random;Math.random=seeded(bin.seed);
+  try{return runBattle(bin.teams[0],bin.teams[1])}finally{Math.random=orig}
+}
+
 /* ---------- Spielablauf ---------- */
 function createGame(){
-  if(typeof Peer==='undefined')return toast('Die Verbindungsbibliothek fehlt. Lade die Seite neu.');
   const name=(document.getElementById('myname').value||'').trim().slice(0,16)||'Spieler 1';
   const mode=document.querySelector('input[name=mode]:checked')?.value||'quick';
   G=fresh();G.role='host';G.me=0;G.code=makeCode();G.names=[name,''];setMode(mode);G.phase='lobby';
   try{localStorage.setItem('arche-name',name)}catch(e){}
   history.replaceState(null,'','?host='+G.code);
-  openHost();render();
+  connectNet();render();
 }
 function joinGame(){
-  if(typeof Peer==='undefined')return toast('Die Verbindungsbibliothek fehlt. Lade die Seite neu.');
   const name=(document.getElementById('myname').value||'').trim().slice(0,16)||'Spieler 2';
   const code=cleanCode(params.get('join')||document.getElementById('code')?.value);
   if(!code)return toast('Bitte gib den Spielcode ein.');
   G=fresh();G.role='guest';G.me=1;G.code=code;G.names=['',name];G.phase='joining';
   try{localStorage.setItem('arche-name',name)}catch(e){}
   history.replaceState(null,'','?join='+code);
-  render();openGuest();
+  connectNet();render();
 }
 function roll(P){
   const r=G.round,t=tierOf(r),keys=pool(1,t);
@@ -613,22 +621,24 @@ function endShop(){
   P.team.slice().forEach(u=>fire(c,u,'endTurn'));
   sel=null;G.myDone=true;G.phase='wait';
   const team=JSON.parse(JSON.stringify(P.team));
-  if(G.role==='host'){G.teams[0]=team;send({t:'oppDone',r:G.round});maybeBattle()}
+  if(G.role==='host'){G.teams[0]=sanitizeTeam(team,'a');send({t:'oppDone',r:G.round});maybeBattle()}
   else send({t:'team',r:G.round,team});
   render();window.scrollTo(0,0);
 }
 function maybeBattle(){
   if(!G.teams[0]||!G.teams[1])return;
-  const res=runBattle(G.teams[0],G.teams[1]);
-  const loss=G.mode==='quick'?1:G.round<=2?1:G.round<=4?2:3;
-  if(res.win>=0){G.score[res.win].wins++;G.score[1-res.win].lives=Math.max(0,G.score[1-res.win].lives-loss)}
-  const bt={r:G.round,frames:res.frames,win:res.win,loss,i:0};
+  const bin={r:G.round,seed:Math.floor(Math.random()*2**31),teams:[G.teams[0],G.teams[1]],loss:G.mode==='quick'?1:G.round<=2?1:G.round<=4?2:3};
+  const res=battleFrom(bin);
+  bin.win=res.win;
+  if(res.win>=0){G.score[res.win].wins++;G.score[1-res.win].lives=Math.max(0,G.score[1-res.win].lives-bin.loss)}
   G.teams=[null,null];G.nextReady=[false,false];
-  send({t:'battle',bt,score:G.score});
-  showBattle(bt,G.score);
+  send({t:'battle',bin,score:G.score});
+  showBattle(bin,G.score,res);
 }
-function showBattle(bt,score){
-  G.bt={...bt,i:0};G.score=score;G.phase='battle';G.myNext=false;window.scrollTo(0,0);play();
+function showBattle(bin,score,res){
+  res=res||battleFrom(bin);
+  G.bin=bin;G.bt={r:bin.r,frames:res.frames,win:bin.win,loss:bin.loss,i:0};
+  G.score=score;G.phase='battle';G.myNext=false;window.scrollTo(0,0);play();
 }
 function play(){
   clearTimeout(timer);render();
@@ -773,11 +783,11 @@ function lobbyHTML(){
   return `<section class="panel cover" style="--pc:var(--p1)">
     <p class="eyebrow">Spiel ${esc(G.code)} · ${G.mode==='quick'?'Schnell':'Klassisch'}</p>
     <h2>Warte auf Mitspieler</h2>
-    <p>${peerOk?'Schick diesen Link an die Person, mit der du spielen willst. Lass diese Seite offen, bis ihr fertig seid.':'Verbinde mit dem Vermittlungsserver …'}</p>
+    <p>${serverUp()?'Schick diesen Link an die Person, mit der du spielen willst. Lass diese Seite offen, bis ihr fertig seid.':'Verbinde mit dem Server …'}</p>
     <div class="linkbox"><input type="text" id="sharelink" value="${esc(link)}" readonly aria-label="Einladungslink"></div>
     <div class="dock">
-      <button class="btn go" data-act="copy" ${peerOk?'':'disabled'}>Link kopieren</button>
-      ${navigator.share?`<button class="btn" data-act="share" ${peerOk?'':'disabled'}>Teilen …</button>`:''}
+      <button class="btn go" data-act="copy">Link kopieren</button>
+      ${navigator.share?`<button class="btn" data-act="share">Teilen …</button>`:''}
     </div>
     <p class="hint">Oder Spielcode nennen: <strong class="code">${esc(G.code)}</strong></p>
   </section>`;
@@ -786,7 +796,8 @@ function joiningHTML(){
   return `<section class="panel cover" style="--pc:var(--p2)">
     <p class="eyebrow">Spiel ${esc(G.code)}</p>
     <h2>Verbinde …</h2>
-    <p>Sobald die Verbindung steht, startet die erste Runde.</p>
+    <p>${serverUp()?'Mit dem Server verbunden. Warte auf eine Antwort vom Spiel. Die Person, die eingeladen hat, muss die Seite geöffnet haben.':'Verbinde mit dem Server …'}</p>
+    <p class="hint">Sobald die Verbindung steht, startet die erste Runde.</p>
   </section>`;
 }
 function overHTML(){
@@ -826,7 +837,7 @@ document.addEventListener('click',e=>{
     speed:()=>{speed=speed>=4?1:speed*2;play()},skip:()=>{G.bt.i=G.bt.frames.length-1;play()},
     next:clickNext,
     again:()=>{try{localStorage.removeItem('arche-'+G.role+'-'+G.code)}catch(err){}
-      try{if(peer)peer.destroy()}catch(err){}peer=null;conn=null;location.href=location.pathname}
+      clients.forEach(c=>{try{c.end(true)}catch(err){}});location.href=location.pathname}
   };
   acts[b.dataset.act]?.();
 });
@@ -842,19 +853,20 @@ document.addEventListener('dragover',e=>{if(e.target.closest&&e.target.closest('
 document.addEventListener('drop',e=>{const b=e.target.closest&&e.target.closest('[data-act="slot"]');if(b&&sel){e.preventDefault();slotClick(+b.dataset.i)}});
 document.addEventListener('dragend',()=>{if(G.phase==='shop')render()});
 
+
 /* ---------- Start ---------- */
 (function boot(){
-  if(typeof Peer==='undefined'){G=fresh();netNote='Die Verbindungsbibliothek konnte nicht geladen werden. Prüfe deine Internetverbindung und lade die Seite neu.';render();return}
   const hostCode=cleanCode(params.get('host')),joinCode=cleanCode(params.get('join'));
   const restored=hostCode?load('host',hostCode):joinCode?load('guest',joinCode):null;
   if(restored&&restored.phase!=='over'&&restored.phase!=='menu'){
-    G=restored;
-    if(G.role==='host')openHost();else{if(G.phase==='menu')G.phase='joining';openGuest()}
-    if(G.phase==='battle')play();else render();
+    G=restored;connectNet();
+    if(G.phase==='battle'&&G.bin)showBattle(G.bin,G.score);
+    else{if(G.phase==='battle')G.phase='wait';render()}
     return;
   }
   G=fresh();
   if(hostCode)history.replaceState(null,'',location.pathname);
+  if(typeof mqtt==='undefined')netNote='Die Verbindungsbibliothek konnte nicht geladen werden. Prüfe dein Internet und lade die Seite neu.';
   render();
 })();
 
