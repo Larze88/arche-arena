@@ -157,7 +157,7 @@ summary{cursor:pointer;font-weight:600}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 body{margin:0}[hidden]{display:none!important}
-.chip.net{padding-left:8px}.chip.net .dot{background:#9aa7ae}.chip.net.ok .dot{background:#3fb24f}.chip.net.off .dot{background:var(--hp)}
+.chip.net{padding-left:8px}.chip.net .dot{background:#9aa7ae}.chip.net.ok .dot{background:#3fb24f}.chip.net.off .dot{background:var(--hp)}.chip.net.wait .dot{background:var(--gold)}
 .pill{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:.9rem;background:#eef4f7;border:2px solid var(--ink);border-radius:999px;padding:.15em .75em}
 .pill.ok{background:#d9f2d4}.pill.off{background:#ffe0e0}
 .netnote{background:#fff4cf;border:2px solid var(--ink);border-radius:14px;padding:10px 14px;font-weight:500}
@@ -662,7 +662,7 @@ function scoreHTML(){
   const on=online();
   return `<div class="score">${[0,1].map(i=>`<div class="chip${i===G.me?' on':''}" style="--c:var(--p${i+1})">
     <span class="dot"></span><span class="nm">${esc(G.names[i]||'…')}${i===G.me?' (du)':''}</span><span title="Leben">❤️ ${G.score[i].lives}</span><span title="Siege">🏆 ${G.score[i].wins}/${G.target}</span></div>`).join('')}
-    <div class="chip net ${on?'ok':'off'}"><span class="dot"></span>${on?'Verbunden':'Getrennt'}</div></div>`;
+    <div class="chip net ${on?'ok':serverUp()?'wait':'off'}"><span class="dot"></span>${on?'Verbunden':!serverUp()?'Kein Server':G.phase==='lobby'||G.phase==='joining'?'Warte auf Gegenüber':'Gegenüber offline'}</div></div>`;
 }
 function oppStatus(){
   if(!online())return `<span class="pill off">${esc(G.names[opp()]||'Gegner')} ist gerade nicht verbunden</span>`;
