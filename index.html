@@ -52,7 +52,7 @@ button{font:inherit;color:inherit}
 .slot.empty.target::before{border-color:#fff;background:rgba(255,255,255,.35)}
 .slot.sel,.item.sel{background:rgba(255,255,255,.5);outline:3px solid var(--pc);outline-offset:-1px}
 .slot:focus-visible,.item:focus-visible,.btn:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
-.team .emo{transform:scaleX(-1)}
+.team .emo,.wares [data-act="spet"] .emo{transform:scaleX(-1)}
 
 /* Shop */
 .shelf{background:linear-gradient(180deg,#d89c5f 0%,var(--wood) 60%,var(--wood-d) 100%);border:2px solid var(--ink);border-radius:18px;padding:10px;box-shadow:0 5px 0 var(--ink)}
@@ -264,7 +264,7 @@ const lvlOf=xp=>xp>=5?3:xp>=2?2:1;
 let G=null, sel=null, timer=null, speed=1;
 
 function newUnit(k){const d=A[k];return{id:(G.role==='host'?'h':'g')+(++G.uid),k,a:d.a,h:d.h,xp:0,lvl:1,perk:null,ta:0,th:0}}
-function newPlayer(){return{gold:10,team:[],shopPets:[],shopFoods:[],buffA:0,buffH:0}}
+function newPlayer(){return{gold:10,slots:[null,null,null,null,null],shopPets:[],shopFoods:[],buffA:0,buffH:0}}
 const cur=()=>G.P;
 
 /* ---------- Fähigkeiten-Kontext (Shop & Kampf) ---------- */
@@ -303,7 +303,6 @@ function doFaint(c,u,pos){
   if(u.perk==='honey')c.summon('bee',1,1,pos);
   if(u.perk==='mushroom')c.summon(u.k,1,1,pos,u.lvl);
 }
-function shopCtx(P){return makeCtx({mode:'shop',team:P.team,foes:[],P,side:0,gold:n=>{P.gold+=n}})}
 
 /* ---------- Kampf ---------- */
 function runBattle(ta,tb){
@@ -361,8 +360,23 @@ function runBattle(ta,tb){
 }
 
 
-/* ---------- Shop-Aktionen ---------- */
+/* ---------- Shop-Aktionen ----------
+   Das Team hat 5 feste Plätze (P.slots, Index 0 = Front), Lücken sind erlaubt.
+   Fähigkeiten sehen das Team ohne Lücken; neue Tiere landen danach auf dem freien Platz nahe dem Anlass. */
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2200)}
+const packed=P=>P.slots.filter(Boolean);
+const freeNear=(P,s)=>[0,1,2,3,4].filter(i=>!P.slots[i]).sort((x,y)=>Math.abs(x-s)-Math.abs(y-s)||y-x);
+function shopRun(P,fn,anchor=4){
+  const team=packed(P),before=new Set(team);
+  fn(makeCtx({mode:'shop',team,foes:[],P,side:0,gold:n=>{P.gold+=n}}),team);
+  P.slots=P.slots.map(u=>u&&team.includes(u)?u:null);
+  for(const u of team)if(!before.has(u)){const f=freeNear(P,anchor)[0];if(f!=null)P.slots[f]=u}
+}
+function makeRoom(P,i){
+  const j=freeNear(P,i)[0];if(j==null)return false;
+  if(j>i)for(let k=j;k>i;k--)P.slots[k]=P.slots[k-1];else for(let k=j;k<i;k++)P.slots[k]=P.slots[k+1];
+  P.slots[i]=null;return true;
+}
 function merge(into,from){
   into.a=clamp(Math.max(into.a,from.a)+1);into.h=clamp(Math.max(into.h,from.h)+1);
   into.ta=Math.max(into.ta,from.ta);into.th=Math.max(into.th,from.th);
@@ -371,7 +385,7 @@ function merge(into,from){
 }
 function afterMerge(P,u,old){
   if(u.lvl>old){
-    fire(shopCtx(P),u,'levelup',null,old);
+    shopRun(P,c=>fire(c,u,'levelup',null,old),P.slots.indexOf(u));
     const t=Math.min(6,tierOf(G.round)+1),nu=newUnit(rand(pool(t,t)));
     nu.a=clamp(nu.a+P.buffA);nu.h=clamp(nu.h+P.buffH);P.shopPets.push({u:nu,fz:false});
     toast(`${A[u.k].n} erreicht Level ${u.lvl}! Ein Bonustier der Stufe ${t} liegt im Shop.`);
@@ -380,29 +394,31 @@ function afterMerge(P,u,old){
 function buyPet(si,i){
   const P=cur(),it=P.shopPets[si];if(!it)return;
   if(P.gold<3)return toast('Nicht genug Gold. Ein Tier kostet 3 Gold.');
-  const t=P.team[i],c=shopCtx(P);
+  const t=P.slots[i];
   if(t&&t.k===it.u.k&&t.lvl<3){
     P.gold-=3;P.shopPets.splice(si,1);
-    const old=merge(t,it.u);fire(c,t,'buy');afterMerge(P,t,old);
-    P.team.slice().forEach(f=>{if(f!==t)fire(c,f,'friendBought',t)});
+    const old=merge(t,it.u);
+    shopRun(P,(c,team)=>{fire(c,t,'buy');team.slice().forEach(f=>{if(f!==t)fire(c,f,'friendBought',t)})},i);
+    afterMerge(P,t,old);
   }else{
-    if(P.team.length>=5)return toast('Das Team ist voll. Verkaufe ein Tier oder lege es auf ein gleiches Tier.');
+    if(t&&!makeRoom(P,i))return toast('Das Team ist voll. Verkaufe ein Tier oder lege es auf ein gleiches Tier.');
     P.gold-=3;P.shopPets.splice(si,1);
-    const u=it.u;P.team.splice(Math.min(i,P.team.length),0,u);
-    fire(c,u,'buy');
-    P.team.slice().forEach(f=>{if(f!==u)fire(c,f,'summoned',u)});
-    P.team.slice().forEach(f=>{if(f!==u)fire(c,f,'friendBought',u)});
+    const u=it.u;P.slots[i]=u;
+    shopRun(P,(c,team)=>{
+      fire(c,u,'buy');
+      team.slice().forEach(f=>{if(f!==u)fire(c,f,'summoned',u)});
+      team.slice().forEach(f=>{if(f!==u)fire(c,f,'friendBought',u)});
+    },i);
   }
   sel=null;render();
 }
 function feed(si,i){
-  const P=cur(),it=P.shopFoods[si],f=FD[it.k],u=P.team[i];if(!u)return;
+  const P=cur(),it=P.shopFoods[si],f=FD[it.k],u=P.slots[i];if(!u)return;
   if(P.gold<f.c)return toast(`Nicht genug Gold. ${f.n} kostet ${f.c} Gold.`);
   P.gold-=f.c;P.shopFoods.splice(si,1);
-  const c=shopCtx(P);
   if(f.perk)u.perk=it.k;
-  else if(it.k==='pill'){P.team.splice(i,1);doFaint(c,u,i)}
-  else f.f(c,u);
+  else if(it.k==='pill'){const pos=P.slots.slice(0,i).filter(Boolean).length;P.slots[i]=null;shopRun(P,c=>doFaint(c,u,pos),i)}
+  else shopRun(P,c=>f.f(c,u),i);
   sel=null;render();
 }
 function useAny(){
@@ -410,11 +426,11 @@ function useAny(){
   const it=P.shopFoods[sel.i],f=FD[it.k];
   if(!f.any)return;
   if(P.gold<f.c)return toast(`Nicht genug Gold. ${f.n} kostet ${f.c} Gold.`);
-  if(!P.team.length&&it.k!=='can')return toast('Du brauchst zuerst Tiere im Team.');
-  P.gold-=f.c;P.shopFoods.splice(sel.i,1);f.f(shopCtx(P));sel=null;render();
+  if(!packed(P).length&&it.k!=='can')return toast('Du brauchst zuerst Tiere im Team.');
+  P.gold-=f.c;P.shopFoods.splice(sel.i,1);shopRun(P,c=>f.f(c));sel=null;render();
 }
 function slotClick(i){
-  const P=cur(),t=P.team[i];
+  const P=cur(),t=P.slots[i];
   if(!sel){if(t)sel={z:'team',i};render();return}
   if(sel.z==='pet')return buyPet(sel.i,i);
   if(sel.z==='food'){
@@ -424,16 +440,19 @@ function slotClick(i){
   }
   if(sel.z==='team'){
     if(sel.i===i){sel=null;render();return}
-    const s=P.team[sel.i];
-    if(t&&t.k===s.k&&t.lvl<3&&s.lvl<3){const old=merge(t,s);P.team.splice(sel.i,1);afterMerge(P,t,old)}
-    else{P.team.splice(sel.i,1);P.team.splice(Math.min(i,P.team.length),0,s)}
+    const s=P.slots[sel.i];
+    if(t&&t.k===s.k&&t.lvl<3&&s.lvl<3){const old=merge(t,s);P.slots[sel.i]=null;afterMerge(P,t,old)}
+    else{P.slots[sel.i]=t||null;P.slots[i]=s}
     sel=null;render();
   }
 }
 function pickShop(z,i){
   const P=cur();
   if(sel&&sel.z===z&&sel.i===i){
-    if(z==='pet')return buyPet(i,P.team.length>=5?4:P.team.length);
+    if(z==='pet'){
+      const k=P.shopPets[i].u.k,same=P.slots.findIndex(t=>t&&t.k===k&&t.lvl<3),free=P.slots.findIndex(t=>!t);
+      return buyPet(i,same>=0?same:free>=0?free:0);
+    }
     if(z==='food'&&FD[P.shopFoods[i].k].any)return useAny();
     sel=null;
   }else sel={z,i};
@@ -448,8 +467,8 @@ function doFreeze(){
 }
 function doSell(){
   const P=cur();if(!sel||sel.z!=='team')return;
-  const u=P.team[sel.i];P.team.splice(sel.i,1);P.gold+=u.lvl;
-  fire(shopCtx(P),u,'sell');
+  const i=sel.i,u=P.slots[i];P.slots[i]=null;P.gold+=u.lvl;
+  shopRun(P,c=>fire(c,u,'sell'),i);
   toast(`${A[u.k].n} verkauft: +${u.lvl} Gold.`);sel=null;render();
 }
 
@@ -470,18 +489,18 @@ function uHTML(u,o={}){
 }
 function infoHTML(P){
   if(sel&&sel.z==='pet'){const u=P.shopPets[sel.i].u,d=A[u.k];
-    const same=P.team.some(t=>t.k===u.k&&t.lvl<3);
+    const same=packed(P).some(t=>t.k===u.k&&t.lvl<3);
     return `<h3>${d.e} ${d.n}<span class="tag">Stufe ${d.t} · 3 Gold</span></h3><p>${abil(u.k,1)}</p>
-      <p class="hint">Tippe auf einen Platz im Team, um es dort zu kaufen${same?', oder auf das gleiche Tier im Team, um sie zu kombinieren':''}. Nochmal antippen kauft es ans Ende.</p>`}
+      <p class="hint">Tippe auf einen Platz im Team, um es dort zu kaufen${same?', oder auf das gleiche Tier im Team, um sie zu kombinieren':''}. Nochmal antippen kauft es auf den vordersten freien Platz.</p>`}
   if(sel&&sel.z==='food'){const it=P.shopFoods[sel.i],f=FD[it.k];
     return `<h3>${f.e} ${f.n}<span class="tag">Stufe ${f.t} · ${f.c} Gold</span></h3><p>${f.d}</p>
       <p class="hint">${f.any?'Tippe auf „Benutzen“ oder nochmal auf das Futter.':'Tippe auf ein Tier im Team, um es zu füttern.'}</p>`}
-  if(sel&&sel.z==='team'){const u=P.team[sel.i],d=A[u.k];
+  if(sel&&sel.z==='team'){const u=P.slots[sel.i],d=A[u.k];
     return `<h3>${d.e} ${d.n}<span class="tag">Level ${u.lvl} · Verkauf ${u.lvl} Gold</span></h3><p>${abil(u.k,u.lvl)}</p>
       ${u.perk?`<p><span class="trig">Perk ${FD[u.perk].e} ${FD[u.perk].n}:</span> ${FD[u.perk].d.replace('Perk: ','')}</p>`:''}
-      <p class="hint">Tippe auf einen anderen Platz zum Verschieben oder auf ein gleiches Tier zum Kombinieren.</p>`}
+      <p class="hint">Tippe auf einen freien Platz zum Verschieben, auf ein anderes Tier zum Tauschen oder auf ein gleiches Tier zum Kombinieren.</p>`}
   return `<h3>Stelle dein Team auf</h3>
-    <p>Tippe ein Tier im Shop an und dann einen Platz im Team. Das Tier ganz rechts kämpft zuerst. Zwei gleiche Tiere übereinander ergeben ein stärkeres Tier: 3 Exemplare für Level 2, 6 für Level 3.</p>
+    <p>Tippe ein Tier im Shop an und dann einen Platz im Team. Das Tier ganz rechts kämpft zuerst. Lücken sind erlaubt, im Kampf rücken alle Tiere nach vorne auf. Zwei gleiche Tiere übereinander ergeben ein stärkeres Tier: 3 Exemplare für Level 2, 6 für Level 3.</p>
     <p class="legend"><b class="a">3</b> Angriff <b class="h">4</b> Lebenspunkte · Am Desktop geht auch Ziehen und Ablegen.</p>`;
 }
 
@@ -572,7 +591,7 @@ function applySync(m){
   if(m.bin){if(!(G.bin&&G.bin.r===m.bin.r)){G.round=m.round;showBattle(m.bin,m.score)}else{if(G.myNext)send({t:'next',r:G.round});render()}return}
   if(m.round>G.round||G.phase==='joining'||!G.P)beginRound(m.round,true);
   G.oppDone=m.hostDone;
-  if(G.phase==='wait'&&!m.guestDone)send({t:'team',r:G.round,team:G.P.team});
+  if(G.phase==='wait'&&!m.guestDone)send({t:'team',r:G.round,team:packed(G.P)});
   render();
 }
 
@@ -612,15 +631,15 @@ function beginRound(r,force){
   if(!force&&r<=G.round&&(G.phase==='shop'||G.phase==='wait'))return;
   if(!G.P)G.P=newPlayer();
   G.round=r;G.myDone=false;G.oppDone=false;G.myNext=false;G.nextReady=[false,false];G.teams=[null,null];sel=null;
-  const P=G.P;P.gold=10;P.team.forEach(u=>{u.ta=0;u.th=0});roll(P);
-  const c=shopCtx(P);P.team.slice().forEach(u=>fire(c,u,'startTurn'));
+  const P=G.P;P.gold=10;packed(P).forEach(u=>{u.ta=0;u.th=0});roll(P);
+  shopRun(P,(c,team)=>team.slice().forEach(u=>fire(c,u,'startTurn')));
   G.phase='shop';render();window.scrollTo(0,0);
 }
 function endShop(){
-  const P=G.P,c=shopCtx(P);
-  P.team.slice().forEach(u=>fire(c,u,'endTurn'));
+  const P=G.P;
+  shopRun(P,(c,team)=>team.slice().forEach(u=>fire(c,u,'endTurn')));
   sel=null;G.myDone=true;G.phase='wait';
-  const team=JSON.parse(JSON.stringify(P.team));
+  const team=JSON.parse(JSON.stringify(packed(P)));
   if(G.role==='host'){G.teams[0]=sanitizeTeam(team,'a');send({t:'oppDone',r:G.round});maybeBattle()}
   else send({t:'team',r:G.round,team});
   render();window.scrollTo(0,0);
@@ -672,9 +691,9 @@ function shopHTML(){
   const P=G.P,r=G.round,isPet=sel&&sel.z==='pet',isFood=sel&&sel.z==='food',pc=`--pc:var(--p${G.me+1})`;
   let slots='';
   for(let i=0;i<5;i++){
-    const u=P.team[i],s=sel&&sel.z==='team'&&sel.i===i;
+    const u=P.slots[i],s=sel&&sel.z==='team'&&sel.i===i;
     slots+=u?`<button class="slot${s?' sel':''}" data-act="slot" data-i="${i}" draggable="true" aria-label="${esc(tip(u))}">${uHTML(u)}</button>`
-            :`<button class="slot empty${isPet&&i===P.team.length?' target':''}" data-act="slot" data-i="${i}" aria-label="Freier Platz ${i+1}"></button>`;
+            :`<button class="slot empty${isPet&&i===P.slots.findIndex(x=>!x)?' target':''}" data-act="slot" data-i="${i}" aria-label="Freier Platz ${i+1}"></button>`;
   }
   const pets=P.shopPets.map((x,i)=>`<button class="item${x.fz?' fz':''}${isPet&&sel.i===i?' sel':''}" data-act="spet" data-i="${i}" draggable="true" aria-label="${esc(tip(x.u))}, 3 Gold${x.fz?', eingefroren':''}">${uHTML(x.u,{lv:false})}<span class="price">3</span></button>`).join('');
   const foods=P.shopFoods.map((x,i)=>{const f=FD[x.k];return `<button class="item${x.fz?' fz':''}${isFood&&sel.i===i?' sel':''}" data-act="sfood" data-i="${i}" draggable="true" aria-label="${f.n}: ${f.d} ${f.c} Gold" title="${esc(f.n+': '+f.d)}"><div class="unit"><span class="emo">${f.e}</span></div><span class="price">${f.c}</span></button>`}).join('');
@@ -699,7 +718,7 @@ function shopHTML(){
       <button class="btn" data-act="roll" ${P.gold<1?'disabled':''}>🎲 Würfeln <span class="k">1 Gold</span></button>
       ${shopSel?`<button class="btn ice" data-act="freeze">❄ ${frozen?'Auftauen':'Einfrieren'}</button>`:''}
       ${anyFood?`<button class="btn" data-act="use">Benutzen</button>`:''}
-      ${teamSel?`<button class="btn" data-act="sell">Verkaufen <span class="k">+${P.team[sel.i].lvl} Gold</span></button>`:''}
+      ${teamSel?`<button class="btn" data-act="sell">Verkaufen <span class="k">+${P.slots[sel.i].lvl} Gold</span></button>`:''}
       ${sel?`<button class="btn" data-act="cancel">Abbrechen</button>`:''}
       <span class="grow"></span>
       <button class="btn go" data-act="end">Fertig ✓</button>
@@ -710,7 +729,7 @@ function waitHTML(){
   return `<section class="panel cover" style="${pc}">
     <p class="eyebrow">Runde ${G.round}</p>
     <h2>Dein Team steht</h2>
-    <div class="ground mini"><div class="team">${G.P.team.map(u=>`<div class="slot">${uHTML(u)}</div>`).join('')||'<p class="empty-note">Kein Tier im Team. Du kämpfst diese Runde mit leeren Händen.</p>'}</div></div>
+    <div class="ground mini"><div class="team">${packed(G.P).map(u=>`<div class="slot">${uHTML(u)}</div>`).join('')||'<p class="empty-note">Kein Tier im Team. Du kämpfst diese Runde mit leeren Händen.</p>'}</div></div>
     <p>${oppStatus()}</p>
     <p class="hint">Der Kampf startet automatisch, sobald ${esc(G.names[opp()]||'die andere Person')} auch fertig ist.</p>
   </section>`;
@@ -805,7 +824,7 @@ function overHTML(){
   return `<section class="panel cover" style="--pc:var(--p${W+1})">
     <p class="eyebrow">Spielende nach ${G.round} Runden</p>
     <h2>${iWin?'Du gewinnst die Arche-Arena!':esc(G.names[W])+' gewinnt die Arche-Arena.'}</h2>
-    ${G.P&&G.P.team.length?`<div class="hero-pets" aria-hidden="true">${G.P.team.map(u=>A[u.k].e).join('')}</div>`:''}
+    ${G.P&&packed(G.P).length?`<div class="hero-pets" aria-hidden="true">${packed(G.P).map(u=>A[u.k].e).join('')}</div>`:''}
     <p>${esc(G.names[W])}: ${G.score[W].wins} Siege, ${G.score[W].lives} Leben übrig. ${esc(G.names[L])}: ${G.score[L].wins} Siege, ${G.score[L].lives} Leben übrig.</p>
     <button class="btn go" data-act="again">Neues Spiel</button>
   </section>`;
@@ -846,7 +865,7 @@ document.addEventListener('dragstart',e=>{
   const b=e.target.closest&&e.target.closest('[data-act]');if(!b||G.phase!=='shop'){e.preventDefault();return}
   const act=b.dataset.act,i=+b.dataset.i;
   if(act==='spet')sel={z:'pet',i};else if(act==='sfood')sel={z:'food',i};
-  else if(act==='slot'&&cur().team[i])sel={z:'team',i};else{e.preventDefault();return}
+  else if(act==='slot'&&cur().slots[i])sel={z:'team',i};else{e.preventDefault();return}
   e.dataTransfer.setData('text/plain',act);e.dataTransfer.effectAllowed='move';
 });
 document.addEventListener('dragover',e=>{if(e.target.closest&&e.target.closest('[data-act="slot"]'))e.preventDefault()});
@@ -859,7 +878,7 @@ document.addEventListener('dragend',()=>{if(G.phase==='shop')render()});
   const hostCode=cleanCode(params.get('host')),joinCode=cleanCode(params.get('join'));
   const restored=hostCode?load('host',hostCode):joinCode?load('guest',joinCode):null;
   if(restored&&restored.phase!=='over'&&restored.phase!=='menu'){
-    G=restored;connectNet();
+    G=restored;if(G.P&&!G.P.slots){G.P.slots=[0,1,2,3,4].map(i=>G.P.team[i]||null);delete G.P.team}connectNet();
     if(G.phase==='battle'&&G.bin)showBattle(G.bin,G.score);
     else{if(G.phase==='battle')G.phase='wait';render()}
     return;
