@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Arche-Arena</title>
+<meta name="description" content="Auto-Battler mit Tieren für zwei Personen, online per Link.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦦</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&family=Lilita+One&display=swap">
+<style>
+/* Layout: ein Spieltisch – Punktestand oben, Team auf der Wiese, Shop auf dem Holzbrett, Aktionsleiste unten. Bewusst ein heller Tageslicht-Look. */
+:root{
+  --sky:#a7d8ef; --sky-2:#e6f5e1; --grass:#62b24f; --grass-d:#3e8a37; --wood:#c68a4f; --wood-d:#8d5a2c;
+  --panel:#ffffff; --ink:#1d2b34; --muted:#56707c; --line:#cfe0e8;
+  --p1:#e0503a; --p2:#2a76c9; --gold:#f2ae1d; --atk:#f08a1c; --hp:#e2364a; --ice:#8fd0ff;
+  --display:"Lilita One","Arial Rounded MT Bold",system-ui,sans-serif;
+  --body:"Fredoka",ui-rounded,system-ui,sans-serif;
+  --pc:var(--p1);
+  color-scheme:light;
+}
+html,body{min-height:100%}
+body{background:linear-gradient(180deg,var(--sky) 0%,var(--sky-2) 75%) fixed;background-color:var(--sky-2);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.4}
+button{font:inherit;color:inherit}
+.wrap{max-width:1020px;margin:0 auto;padding-block:12px 28px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+
+/* Kopfzeile */
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{font-family:var(--display);font-size:1.7rem;letter-spacing:.01em;color:var(--ink);text-shadow:0 2px 0 #fff}
+.brand small{font-family:var(--body);font-size:.8rem;color:var(--muted);font-weight:500;margin-left:6px;text-shadow:none}
+.score{display:flex;gap:8px;flex-wrap:wrap}
+.chip{display:flex;align-items:center;gap:8px;background:var(--panel);border:2px solid var(--ink);border-radius:999px;padding:4px 12px 4px 6px;box-shadow:0 3px 0 var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.chip .dot{width:14px;height:14px;border-radius:50%;background:var(--c);border:2px solid var(--ink)}
+.chip.on{outline:3px solid var(--c);outline-offset:2px}
+.chip .nm{max-width:9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Panels */
+.panel{background:var(--panel);border:2px solid var(--ink);border-radius:18px;box-shadow:0 5px 0 var(--ink)}
+.bar{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;padding:10px 14px}
+.who{font-family:var(--display);font-size:1.35rem;color:var(--pc);display:flex;align-items:center;gap:8px;min-width:0}
+.who span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.coin{display:inline-grid;place-items:center;min-width:2em;height:2em;padding:0 .3em;border-radius:999px;background:var(--gold);border:2px solid var(--ink);font-family:var(--display);font-size:1.1rem;font-variant-numeric:tabular-nums}
+.res{display:flex;align-items:center;gap:6px;font-weight:600}
+.meta{margin-left:auto;color:var(--muted);font-weight:500}
+
+/* Spielfeld: Team */
+.ground{position:relative;background:linear-gradient(180deg,var(--grass) 0%,var(--grass-d) 100%);border:2px solid var(--ink);border-radius:22px 22px 18px 18px;padding:12px 10px 10px;box-shadow:0 5px 0 var(--ink)}
+.lbl{display:flex;justify-content:space-between;color:#fff;font-weight:600;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;padding:0 6px 4px;text-shadow:0 1px 0 rgba(0,0,0,.35)}
+.team{display:flex;flex-direction:row-reverse;justify-content:center;gap:clamp(4px,1.6vw,14px);font-size:clamp(11px,3.1vw,15px)}
+.slot{appearance:none;border:0;background:none;padding:.3em .2em;border-radius:16px;cursor:pointer;position:relative;display:grid;place-items:center;min-height:7.6em;width:5.6em}
+.slot.empty::before{content:"";width:3.6em;height:3.6em;border-radius:50%;border:2px dashed rgba(255,255,255,.65);background:rgba(255,255,255,.12)}
+.slot.empty.target::before{border-color:#fff;background:rgba(255,255,255,.35)}
+.slot.sel,.item.sel{background:rgba(255,255,255,.5);outline:3px solid var(--pc);outline-offset:-1px}
+.slot:focus-visible,.item:focus-visible,.btn:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+.team .emo{transform:scaleX(-1)}
+
+/* Shop */
+.shelf{background:linear-gradient(180deg,#d89c5f 0%,var(--wood) 60%,var(--wood-d) 100%);border:2px solid var(--ink);border-radius:18px;padding:10px;box-shadow:0 5px 0 var(--ink)}
+.shelf .lbl{text-shadow:0 1px 0 rgba(0,0,0,.4)}
+.wares{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;font-size:clamp(11px,3.1vw,15px)}
+.wares .sep{width:2px;align-self:stretch;background:rgba(0,0,0,.25);border-radius:2px;margin:0 4px}
+.item{appearance:none;border:0;background:rgba(255,255,255,.18);border-radius:16px;padding:.3em .2em 1.5em;cursor:pointer;position:relative;width:5.6em;display:grid;place-items:center}
+.item:hover,.slot:hover{background:rgba(255,255,255,.3)}
+.price{position:absolute;bottom:.25em;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:3px;font-family:var(--display);font-size:.95em;background:var(--gold);border:2px solid var(--ink);border-radius:999px;padding:0 .5em;line-height:1.35}
+.item.fz{background:linear-gradient(180deg,rgba(143,208,255,.85),rgba(143,208,255,.55));box-shadow:inset 0 0 0 2px #fff}
+.item.fz::after{content:"❄";position:absolute;top:.15em;left:.35em;font-size:1.1em;color:#fff;text-shadow:0 0 3px #2a76c9}
+
+/* Tier-Figur */
+.unit{position:relative;width:5em;height:6em;display:grid;place-items:center;pointer-events:none}
+.unit::before{content:"";position:absolute;bottom:1.25em;left:50%;width:3.4em;height:.7em;transform:translateX(-50%);border-radius:50%;background:rgba(0,0,0,.22)}
+.emo{font-size:2.9em;line-height:1;position:relative;top:-.12em;display:inline-block;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+.emo.z{filter:hue-rotate(70deg) saturate(.55) brightness(.9)}
+.st{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:center;gap:.25em}
+.st b{display:grid;place-items:center;min-width:1.75em;height:1.75em;padding:0 .15em;font-family:var(--display);font-weight:400;font-size:1.05em;color:#fff;border:2px solid var(--ink);text-shadow:0 1px 0 rgba(0,0,0,.4);font-variant-numeric:tabular-nums}
+.st .atk{background:var(--atk);border-radius:.45em}
+.st .hp{background:var(--hp);border-radius:50%}
+.st .tmp{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--atk)}
+.lv{position:absolute;top:0;left:0;font-family:var(--display);font-size:.78em;background:var(--ink);color:#fff;border-radius:999px;padding:.05em .5em;line-height:1.3;display:flex;gap:.3em;align-items:center}
+.lv i{font-style:normal;letter-spacing:-.05em;color:var(--gold);font-size:.85em}
+.perk{position:absolute;top:-.1em;right:0;font-size:1.3em;background:#fff;border:2px solid var(--ink);border-radius:50%;width:1.45em;height:1.45em;display:grid;place-items:center;line-height:1}
+.perk span{font-size:.75em}
+
+/* Info + Aktionen */
+.info{padding:12px 16px;display:grid;gap:4px;min-height:5.2em}
+.info h3{margin:0;font-family:var(--display);font-weight:400;font-size:1.25rem;letter-spacing:.01em;text-wrap:balance}
+.info p{margin:0;max-width:68ch}
+.info .hint{color:var(--muted);font-size:.92rem}
+.trig{font-weight:600;color:var(--pc)}
+.tag{display:inline-block;font-size:.72rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-left:6px}
+.dock{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.dock .grow{flex:1}
+.btn{appearance:none;border:2px solid var(--ink);background:var(--panel);border-radius:14px;padding:.55em 1em;font-family:var(--display);font-size:1.02rem;letter-spacing:.01em;box-shadow:0 3px 0 var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:.4em;transition:transform .06s}
+.btn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--ink)}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:0 3px 0 var(--ink)}
+.btn.go{background:var(--pc);color:#fff;text-shadow:0 1px 0 rgba(0,0,0,.3)}
+.btn.ice{background:var(--ice)}
+.btn .k{font-family:var(--body);font-weight:600;font-size:.82em;opacity:.8}
+
+/* Übergabe / Setup / Ende */
+.cover{padding:clamp(22px,5vw,44px);display:grid;gap:14px;justify-items:start;max-width:640px;margin:4vh auto 0;width:100%;box-sizing:border-box}
+.eyebrow{margin:0;font-size:.8rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.cover h2{margin:0;font-family:var(--display);font-weight:400;font-size:clamp(1.8rem,6vw,2.8rem);line-height:1.05;color:var(--pc);text-wrap:balance}
+.cover p{margin:0;max-width:52ch}
+.hero-pets{font-size:clamp(2rem,7vw,3rem);letter-spacing:.1em;line-height:1}
+.form{display:grid;gap:12px;width:100%}
+.form label{display:grid;gap:4px;font-weight:600}
+.form input[type=text]{font:inherit;padding:.55em .8em;border:2px solid var(--ink);border-radius:12px;background:#fff;color:var(--ink)}
+.form input[type=text]:focus{outline:3px solid var(--pc);outline-offset:1px}
+.modes{display:flex;gap:8px;flex-wrap:wrap}
+.modes label{display:flex;align-items:center;gap:8px;border:2px solid var(--ink);border-radius:12px;padding:.5em .8em;cursor:pointer;font-weight:500;background:#fff}
+.modes label:has(input:checked){background:var(--gold)}
+details{width:100%}
+summary{cursor:pointer;font-weight:600}
+.rules{margin:.6em 0 0;padding-left:1.2em;display:grid;gap:4px;max-width:62ch}
+.legend{display:inline-flex;gap:6px;align-items:center;font-size:.85rem;color:var(--muted)}
+.legend b{display:inline-grid;place-items:center;width:1.5em;height:1.5em;color:#fff;border:2px solid var(--ink);font-family:var(--display);font-weight:400;font-size:.85rem}
+.legend .a{background:var(--atk);border-radius:.4em}.legend .h{background:var(--hp);border-radius:50%}
+
+/* Arena */
+.arena{padding:12px;display:grid;gap:12px}
+.ahead{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:2px 4px}
+.ahead .n{font-family:var(--display);font-size:1.2rem}
+.ahead .n.a{color:var(--p1)}.ahead .n.b{color:var(--p2)}
+.ahead .r{color:var(--muted);font-weight:500}
+.field{display:flex;align-items:flex-end;justify-content:center;gap:clamp(10px,3vw,30px);background:linear-gradient(180deg,var(--grass),var(--grass-d));border:2px solid var(--ink);border-radius:18px;padding:16px 8px 10px;min-height:9em;font-size:clamp(8px,1.5vw,14px)}
+.side{display:flex;gap:.4em;flex:1;min-width:0}
+.side.a{flex-direction:row-reverse}
+.side.a .emo{transform:scaleX(-1)}
+.vs{font-family:var(--display);color:#fff;font-size:1.6em;align-self:center;text-shadow:0 2px 0 rgba(0,0,0,.35)}
+.log{margin:0;min-height:1.5em;font-weight:500;text-align:center}
+.unit.lunge{animation:lungeA .42s ease-out}
+.side.b .unit.lunge{animation-name:lungeB}
+@keyframes lungeA{45%{transform:translateX(22%)}}
+@keyframes lungeB{45%{transform:translateX(-22%)}}
+.unit.hit .emo{animation:shake .4s}
+@keyframes shake{20%{translate:-3px 0}40%{translate:3px 0}60%{translate:-2px 0}80%{translate:2px 0}}
+.dmg{position:absolute;top:.6em;left:50%;transform:translateX(-50%);font-family:var(--display);color:#fff;background:var(--hp);border:2px solid var(--ink);border-radius:999px;padding:0 .45em;font-size:1.1em;animation:rise .7s ease-out forwards}
+.dmg.zero{background:var(--ice);color:var(--ink)}
+@keyframes rise{from{opacity:0;translate:0 6px}30%{opacity:1}to{opacity:1;translate:0 -10px}}
+.result{padding:14px 16px;display:grid;gap:4px;border-radius:14px;border:2px solid var(--ink);background:var(--rc,#fff)}
+.result h3{margin:0;font-family:var(--display);font-weight:400;font-size:1.4rem;color:#fff;text-shadow:0 1px 0 rgba(0,0,0,.3)}
+.result p{margin:0;color:#fff;font-weight:500}
+.result.draw{--rc:var(--muted)}
+
+#toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:#fff;padding:.6em 1.1em;border-radius:999px;font-weight:500;max-width:calc(100% - 32px);box-sizing:border-box;text-align:center;z-index:20;transition:opacity .2s;pointer-events:none}
+
+@media (max-width:640px){
+  .field{flex-direction:column-reverse;align-items:stretch;font-size:clamp(9px,3vw,13px);padding:10px 6px}
+  .side.a{flex-direction:row}
+  .side.a .emo{transform:none}
+  .vs{font-size:1.2em;text-align:center}
+  @keyframes lungeA{45%{transform:translateY(-16%)}}
+  @keyframes lungeB{45%{transform:translateY(16%)}}
+  .meta{margin-left:0;width:100%}
+  .brand{font-size:1.4rem}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+body{margin:0}[hidden]{display:none!important}
+.chip.net{padding-left:8px}.chip.net .dot{background:#9aa7ae}.chip.net.ok .dot{background:#3fb24f}.chip.net.off .dot{background:var(--hp)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:.9rem;background:#eef4f7;border:2px solid var(--ink);border-radius:999px;padding:.15em .75em}
+.pill.ok{background:#d9f2d4}.pill.off{background:#ffe0e0}
+.netnote{background:#fff4cf;border:2px solid var(--ink);border-radius:14px;padding:10px 14px;font-weight:500}
+.linkbox{width:100%}
+.linkbox input{width:100%;box-sizing:border-box;font:inherit;font-size:.95rem;padding:.6em .8em;border:2px solid var(--ink);border-radius:12px;background:#f3f8fb;color:var(--ink)}
+.code{font-family:var(--display);font-weight:400;font-size:1.3rem;letter-spacing:.12em;color:var(--ink)}
+.hint{color:var(--muted)}
+.ground.mini{width:100%;box-sizing:border-box}
+.ground.mini .slot{cursor:default}
+.empty-note{color:#fff;margin:.5em;font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<div id="toast" hidden></div>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+/* ---------- Daten ---------- */
+const TR={faint:'Ohnmacht',sell:'Verkauf',buy:'Kauf',sob:'Kampfstart',hurt:'Verletzt',beforeAtk:'Vor dem Angriff',endTurn:'Rundenende',startTurn:'Rundenstart',summoned:'Freund beschworen',levelup:'Levelaufstieg',aheadAtk:'Freund davor greift an',ko:'Gegner besiegt',aheadFaint:'Freund davor fällt',friendFaint:'Freund fällt',friendBought:'Freund gekauft'};
+const pl=(l,a,b)=>l>1?b:a;
+const A={
+  // Stufe 1
+  ant:{n:'Ameise',e:'🐜',t:1,a:2,h:2,tr:'faint',d:l=>`Gib einem zufälligen Freund +${2*l}/+${l}.`,f:(c,s,l)=>c.pickFriends(s,1).forEach(f=>c.buff(f,2*l,l))},
+  fish:{n:'Fisch',e:'🐟',t:1,a:2,h:3,tr:'levelup',d:l=>`Gib allen Freunden +${l}/+${l}.`,f:(c,s,l)=>c.friends(s).forEach(f=>c.buff(f,l,l))},
+  beaver:{n:'Biber',e:'🦫',t:1,a:3,h:2,tr:'sell',d:l=>`Gib 2 zufälligen Freunden +${l} HP.`,f:(c,s,l)=>c.pickFriends(s,2).forEach(f=>c.buff(f,0,l))},
+  cricket:{n:'Grille',e:'🦗',t:1,a:1,h:2,tr:'faint',d:l=>`Beschwöre eine Zombie-Grille ${l}/${l}.`,f:(c,s,l,p)=>c.summon('zcricket',l,l,p)},
+  duck:{n:'Ente',e:'🦆',t:1,a:2,h:3,tr:'sell',d:l=>`Gib allen Tieren im Shop +${l} HP.`,f:(c,s,l)=>{if(c.P)c.P.shopPets.forEach(x=>c.buff(x.u,0,l))}},
+  mosquito:{n:'Mücke',e:'🦟',t:1,a:2,h:2,tr:'sob',d:l=>`Füge ${l} zufälligen ${pl(l,'Gegner','Gegnern')} 1 Schaden zu.`,f:(c,s,l)=>c.pick(c.foesAlive(),l).forEach(t=>c.hit(t,1))},
+  otter:{n:'Otter',e:'🦦',t:1,a:1,h:3,tr:'buy',d:l=>`Gib ${l} ${pl(l,'zufälligem Freund','zufälligen Freunden')} +1/+1.`,f:(c,s,l)=>c.pickFriends(s,l).forEach(f=>c.buff(f,1,1))},
+  pig:{n:'Schwein',e:'🐖',t:1,a:4,h:1,tr:'sell',d:l=>`Erhalte ${l} zusätzliches Gold.`,f:(c,s,l)=>c.gold(l)},
+  horse:{n:'Pferd',e:'🐴',t:1,a:2,h:1,tr:'summoned',d:l=>`Gib dem neuen Freund +${l} ATK.`,f:(c,s,l,u)=>c.buff(u,l,0)},
+  // Stufe 2
+  crab:{n:'Krabbe',e:'🦀',t:2,a:3,h:1,tr:'sob',d:l=>`Kopiere ${50*l}% der HP des gesündesten Freundes.`,f:(c,s,l)=>{const m=Math.max(0,...c.friends(s).map(f=>f.h));const v=Math.min(50,Math.floor(m*.5*l));if(v>s.h)s.h=v}},
+  hedgehog:{n:'Igel',e:'🦔',t:2,a:3,h:2,tr:'faint',d:l=>`Füge allen Tieren ${2*l} Schaden zu (nur im Kampf).`,f:(c,s,l)=>[...c.alive(c.team),...c.foesAlive()].forEach(t=>c.hit(t,2*l))},
+  peacock:{n:'Pfau',e:'🦚',t:2,a:2,h:5,tr:'hurt',d:l=>`Erhalte +${2*l} ATK.`,f:(c,s,l)=>c.buff(s,2*l,0)},
+  flamingo:{n:'Flamingo',e:'🦩',t:2,a:4,h:2,tr:'faint',d:l=>`Gib den 2 Tieren dahinter +${l}/+${l}.`,f:(c,s,l,p)=>c.team.slice(p,p+2).filter(u=>u.h>0).forEach(f=>c.buff(f,l,l))},
+  elephant:{n:'Elefant',e:'🐘',t:2,a:3,h:5,tr:'beforeAtk',d:l=>`Füge dem Freund dahinter ${l}× 1 Schaden zu.`,f:(c,s,l)=>{for(let i=0;i<l;i++){const b=c.team[c.idx(s)+1];if(b&&b.h>0)c.hit(b,1)}}},
+  penguin:{n:'Pinguin',e:'🐧',t:2,a:1,h:3,tr:'endTurn',d:l=>`Gib 2 Freunden ab Level 2 je +${l}/+${l}.`,f:(c,s,l)=>c.pick(c.friends(s).filter(f=>f.lvl>=2),2).forEach(f=>c.buff(f,l,l))},
+  swan:{n:'Schwan',e:'🦢',t:2,a:1,h:2,tr:'startTurn',d:l=>`Erhalte ${l} Gold.`,f:(c,s,l)=>c.gold(l)},
+  spider:{n:'Spinne',e:'🕷️',t:2,a:2,h:2,tr:'faint',d:l=>`Beschwöre ein zufälliges Stufe-3-Tier auf Level ${l} als 2/2.`,f:(c,s,l,p)=>c.summon(rand(pool(3,3)),2,2,p,l)},
+  // Stufe 3
+  dog:{n:'Hund',e:'🐕',t:3,a:3,h:3,tr:'summoned',d:l=>`Erhalte +${l} ATK oder +${l} HP.`,f:(c,s,l)=>Math.random()<.5?c.buff(s,l,0):c.buff(s,0,l)},
+  sheep:{n:'Schaf',e:'🐑',t:3,a:2,h:2,tr:'faint',d:l=>`Beschwöre zwei Widder ${2*l}/${2*l}.`,f:(c,s,l,p)=>{c.summon('ram',2*l,2*l,p);c.summon('ram',2*l,2*l,p)}},
+  kangaroo:{n:'Känguru',e:'🦘',t:3,a:1,h:2,tr:'aheadAtk',d:l=>`Erhalte +${2*l}/+${2*l}.`,f:(c,s,l)=>c.buff(s,2*l,2*l)},
+  camel:{n:'Kamel',e:'🐫',t:3,a:2,h:5,tr:'hurt',d:l=>`Gib dem Freund dahinter +${l}/+${2*l}.`,f:(c,s,l)=>{const b=c.team[c.idx(s)+1];if(b&&b.h>0)c.buff(b,l,2*l)}},
+  dodo:{n:'Dodo',e:'🦤',t:3,a:2,h:3,tr:'sob',d:l=>`Gib dem Freund davor ${50*l}% der eigenen ATK.`,f:(c,s,l)=>{const i=c.idx(s),f=i>0?c.team[i-1]:null;if(f&&f.h>0)c.buff(f,Math.floor(s.a*.5*l),0)}},
+  ox:{n:'Ochse',e:'🐂',t:3,a:1,h:3,tr:'aheadFaint',d:l=>`Erhalte eine Melone und +${2*l} ATK.`,f:(c,s,l)=>{s.perk='melon';c.buff(s,2*l,0)}},
+  blowfish:{n:'Kugelfisch',e:'🐡',t:3,a:3,h:5,tr:'hurt',d:l=>`Füge einem zufälligen Gegner ${2*l} Schaden zu.`,f:(c,s,l)=>c.pick(c.foesAlive(),1).forEach(t=>c.hit(t,2*l))},
+  giraffe:{n:'Giraffe',e:'🦒',t:3,a:2,h:4,tr:'endTurn',d:l=>`Gib ${l} ${pl(l,'Freund','Freunden')} davor +1/+1.`,f:(c,s,l)=>{const i=c.idx(s);c.team.slice(Math.max(0,i-l),i).forEach(f=>c.buff(f,1,1))}},
+  // Stufe 4
+  bison:{n:'Bison',e:'🦬',t:4,a:4,h:4,tr:'endTurn',d:l=>`Erhalte +${2*l}/+${2*l}, wenn ein Freund Level 3 ist.`,f:(c,s,l)=>{if(c.friends(s).some(f=>f.lvl>=3))c.buff(s,2*l,2*l)}},
+  deer:{n:'Hirsch',e:'🦌',t:4,a:1,h:1,tr:'faint',d:l=>`Beschwöre einen Bus ${5*l}/${5*l} mit Chili.`,f:(c,s,l,p)=>c.summon('bus',5*l,5*l,p,1,'chili')},
+  hippo:{n:'Nilpferd',e:'🦛',t:4,a:4,h:5,tr:'ko',d:l=>`Erhalte +${3*l}/+${3*l}.`,f:(c,s,l)=>c.buff(s,3*l,3*l)},
+  turtle:{n:'Schildkröte',e:'🐢',t:4,a:1,h:2,tr:'faint',d:l=>`Gib ${l} ${pl(l,'Freund','Freunden')} dahinter eine Melone.`,f:(c,s,l,p)=>c.team.slice(p,p+l).filter(u=>u.h>0).forEach(f=>f.perk='melon')},
+  dolphin:{n:'Delfin',e:'🐬',t:4,a:4,h:3,tr:'sob',d:l=>`Füge dem schwächsten Gegner ${l}× 3 Schaden zu.`,f:(c,s,l)=>{for(let i=0;i<l;i++){const fs=c.foesAlive();if(!fs.length)break;c.hit(fs.reduce((m,u)=>u.h<m.h?u:m),3)}}},
+  // Stufe 5
+  croc:{n:'Krokodil',e:'🐊',t:5,a:8,h:4,tr:'sob',d:l=>`Füge dem hintersten Gegner ${l}× 8 Schaden zu.`,f:(c,s,l)=>{for(let i=0;i<l;i++){const fs=c.foesAlive();if(!fs.length)break;c.hit(fs[fs.length-1],8)}}},
+  rhino:{n:'Nashorn',e:'🦏',t:5,a:5,h:8,tr:'ko',d:l=>`Füge dem vordersten Gegner ${4*l} Schaden zu – wiederholt sich, solange es trifft und besiegt.`,f:(c,s,l)=>{for(let g=0;g<5;g++){const t=c.foesAlive()[0];if(!t)break;c.hit(t,4*l);if(t.h>0)break}}},
+  cow:{n:'Kuh',e:'🐄',t:5,a:4,h:6,tr:'buy',d:l=>`Gib allen Freunden +${l}/+${2*l}.`,f:(c,s,l)=>c.friends(s).forEach(f=>c.buff(f,l,2*l))},
+  monkey:{n:'Affe',e:'🐒',t:5,a:1,h:2,tr:'endTurn',d:l=>`Gib dem vordersten Freund +${2*l}/+${3*l}.`,f:(c,s,l)=>{const f=c.friends(s)[0];if(f)c.buff(f,2*l,3*l)}},
+  shark:{n:'Hai',e:'🦈',t:5,a:4,h:4,tr:'friendFaint',d:l=>`Erhalte +${2*l}/+${l}.`,f:(c,s,l)=>c.buff(s,2*l,l)},
+  turkey:{n:'Truthahn',e:'🦃',t:5,a:3,h:4,tr:'summoned',d:l=>`Gib dem neuen Freund +${2*l}/+${2*l}.`,f:(c,s,l,u)=>c.buff(u,2*l,2*l)},
+  gorilla:{n:'Gorilla',e:'🦍',t:5,a:6,h:9,tr:'hurt',d:l=>`Erhalte eine Melone (${l}× pro Kampf).`,f:(c,s,l)=>{s.uses=s.uses||0;if(c.mode==='battle'&&s.uses<l&&s.perk!=='melon'){s.uses++;s.perk='melon'}}},
+  // Stufe 6
+  dragon:{n:'Drache',e:'🐉',t:6,a:6,h:8,tr:'friendBought',d:l=>`Ist es ein Stufe-1-Tier, erhalten alle Freunde +${l}/+${l}.`,f:(c,s,l,u)=>{if(A[u.k].t===1)c.friends(s).forEach(f=>c.buff(f,l,l))}},
+  mammoth:{n:'Mammut',e:'🦣',t:6,a:4,h:10,tr:'faint',d:l=>`Gib allen Freunden +${2*l}/+${2*l}.`,f:(c,s,l)=>c.alive(c.team).forEach(f=>c.buff(f,2*l,2*l))},
+  snake:{n:'Schlange',e:'🐍',t:6,a:6,h:6,tr:'aheadAtk',d:l=>`Füge einem zufälligen Gegner ${5*l} Schaden zu.`,f:(c,s,l)=>c.pick(c.foesAlive(),1).forEach(t=>c.hit(t,5*l))},
+  leopard:{n:'Leopard',e:'🐆',t:6,a:10,h:4,tr:'sob',d:l=>`Füge ${l} zufälligen ${pl(l,'Gegner','Gegnern')} 50% der eigenen ATK als Schaden zu.`,f:(c,s,l)=>c.pick(c.foesAlive(),l).forEach(t=>c.hit(t,Math.ceil(s.a/2)))},
+  // Beschworene Tiere (nicht im Shop)
+  zcricket:{n:'Zombie-Grille',e:'🦗',z:1,t:0,a:1,h:1},
+  ram:{n:'Widder',e:'🐏',t:0,a:2,h:2},
+  bee:{n:'Biene',e:'🐝',t:0,a:1,h:1},
+  bus:{n:'Bus',e:'🚌',t:0,a:5,h:5},
+};
+const FD={
+  apple:{n:'Apfel',e:'🍎',t:1,c:3,d:'Gib einem Tier +1/+1.',f:(c,u)=>c.buff(u,1,1)},
+  honey:{n:'Honig',e:'🍯',t:1,c:3,perk:1,d:'Perk: Fällt das Tier, erscheint eine Biene 1/1.'},
+  cupcake:{n:'Cupcake',e:'🧁',t:2,c:3,d:'Gib einem Tier +3/+3 nur für diese Runde.',f:(c,u)=>{u.ta+=3;u.th+=3}},
+  bone:{n:'Fleischknochen',e:'🍖',t:2,c:3,perk:1,d:'Perk: Angriffe verursachen +3 Schaden.'},
+  pill:{n:'Schlafpille',e:'💊',t:2,c:1,d:'Das Tier fällt sofort und löst seine Ohnmacht-Fähigkeit aus.'},
+  garlic:{n:'Knoblauch',e:'🧄',t:3,c:3,perk:1,d:'Perk: Erleidet 2 Schaden weniger (mindestens 1).'},
+  salad:{n:'Salat',e:'🥗',t:3,c:3,any:1,d:'Gib 2 zufälligen Tieren im Team +1/+1.',f:c=>c.pick(c.alive(c.team),2).forEach(f=>c.buff(f,1,1))},
+  can:{n:'Dosenfutter',e:'🥫',t:4,c:3,any:1,d:'Alle Tiere im Shop, auch künftige, erhalten +1/+1.',f:c=>{c.P.buffA++;c.P.buffH++;c.P.shopPets.forEach(x=>c.buff(x.u,1,1))}},
+  pear:{n:'Birne',e:'🍐',t:4,c:3,d:'Gib einem Tier +2/+2.',f:(c,u)=>c.buff(u,2,2)},
+  chili:{n:'Chili',e:'🌶️',t:5,c:3,perk:1,d:'Perk: Jeder Angriff trifft auch das zweite Tier für 5 Schaden.'},
+  melon:{n:'Melone',e:'🍉',t:5,c:3,perk:1,d:'Perk: Blockt einmal 20 Schaden.'},
+  mushroom:{n:'Pilz',e:'🍄',t:6,c:3,perk:1,d:'Perk: Kommt nach dem Fallen als 1/1 zurück.'},
+  pizza:{n:'Pizza',e:'🍕',t:6,c:3,any:1,d:'Gib 2 zufälligen Tieren im Team +2/+2.',f:c=>c.pick(c.alive(c.team),2).forEach(f=>c.buff(f,2,2))},
+  steak:{n:'Steak',e:'🥩',t:6,c:3,perk:1,d:'Perk: Der nächste Angriff verursacht +20 Schaden.'},
+};
+
+/* ---------- Helfer ---------- */
+const rand=a=>a[Math.floor(Math.random()*a.length)];
+const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+const clamp=v=>Math.max(0,Math.min(50,v));
+const pool=(lo,hi)=>Object.keys(A).filter(k=>A[k].t>=lo&&A[k].t<=hi);
+const fpool=t=>Object.keys(FD).filter(k=>FD[k].t<=t);
+const tierOf=r=>Math.min(6,Math.ceil(r/2));
+const petSlots=r=>r>=9?5:r>=5?4:3;
+const foodSlots=r=>r>=3?2:1;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const lvlOf=xp=>xp>=5?3:xp>=2?2:1;
+
+let G=null, sel=null, timer=null, speed=1;
+
+function newUnit(k){const d=A[k];return{id:(G.role==='host'?'h':'g')+(++G.uid),k,a:d.a,h:d.h,xp:0,lvl:1,perk:null,ta:0,th:0}}
+function newPlayer(){return{gold:10,team:[],shopPets:[],shopFoods:[],buffA:0,buffH:0}}
+const cur=()=>G.P;
+
+/* ---------- Fähigkeiten-Kontext (Shop & Kampf) ---------- */
+function makeCtx(o){
+  const c=Object.assign({hit(){},gold(){},say(){},after(){}},o);
+  c.alive=a=>a.filter(u=>u.h>0);
+  c.friends=s=>c.team.filter(u=>u!==s&&u.h>0);
+  c.pick=(arr,n)=>shuffle(arr.slice()).slice(0,n);
+  c.pickFriends=(s,n)=>c.pick(c.friends(s),n);
+  c.foesAlive=()=>c.foes.filter(u=>u.h>0);
+  c.idx=s=>c.team.indexOf(s);
+  c.buff=(u,a,h)=>{u.a=clamp(u.a+a);u.h=clamp(u.h+h)};
+  c.summon=(k,a,h,pos,lvl=1,perk=null)=>{
+    if(c.alive(c.team).length>=5)return null;
+    const u=newUnit(k);u.a=a;u.h=h;u.lvl=lvl;u.xp=lvl===3?5:lvl===2?2:0;u.perk=perk;u.side=c.side;
+    c.team.splice(Math.max(0,Math.min(pos,c.team.length)),0,u);
+    c.say(`${A[k].e} ${A[k].n} erscheint`);
+    for(const f of c.team.slice())if(f!==u&&f.h>0)fire(c,f,'summoned',u);
+    return u;
+  };
+  return c;
+}
+function fire(c,u,trig,extra,lv){
+  const d=A[u.k];
+  if(d.tr!==trig||!d.f)return false;
+  if(trig!=='faint'&&u.h<=0)return false;
+  d.f(c,u,lv||u.lvl,extra);
+  c.after(u,trig);
+  return true;
+}
+function doFaint(c,u,pos){
+  const behind=c.team[pos];
+  if(behind&&behind.h>0)fire(c,behind,'aheadFaint',u);
+  for(const f of c.team.slice())if(f.h>0)fire(c,f,'friendFaint',u);
+  fire(c,u,'faint',pos);
+  if(u.perk==='honey')c.summon('bee',1,1,pos);
+  if(u.perk==='mushroom')c.summon(u.k,1,1,pos,u.lvl);
+}
+function shopCtx(P){return makeCtx({mode:'shop',team:P.team,foes:[],P,side:0,gold:n=>{P.gold+=n}})}
+
+/* ---------- Kampf ---------- */
+function runBattle(ta,tb){
+  const cp=u=>({id:u.id,k:u.k,a:u.a,h:u.h,lvl:u.lvl,xp:u.xp,perk:u.perk});
+  const T=[ta.map(u=>({...cp(u),a:clamp(u.a+u.ta),h:clamp(u.h+u.th),side:0})),tb.map(u=>({...cp(u),a:clamp(u.a+u.ta),h:clamp(u.h+u.th),side:1}))];
+  const F=[];let hits={},lunge=[],hurtQ=[];
+  const snap=msg=>{if(F.length<1500)F.push({t:[T[0].map(cp),T[1].map(cp)],msg,hits,lunge});hits={};lunge=[]};
+  const dmg=(t,d)=>{
+    if(!t||t.h<=0||d<=0)return;
+    if(t.perk==='melon'){d=Math.max(0,d-20);t.perk=null}
+    else if(t.perk==='garlic')d=Math.max(1,d-2);
+    hits[t.id]=(hits[t.id]||0)+d;
+    if(d<=0)return;
+    t.h-=d;hurtQ.push(t);
+  };
+  const C=[0,1].map(s=>makeCtx({mode:'battle',team:T[s],foes:T[1-s],side:s,hit:dmg,
+    after:(u,tr)=>snap(`${A[u.k].e} ${A[u.k].n} · ${TR[tr]}`)}));
+  const flush=()=>{let n=0;while(hurtQ.length&&n++<500){const u=hurtQ.shift();if(u.h>0)fire(C[u.side],u,'hurt')}};
+  const resolve=()=>{
+    for(let g=0;g<300;g++){
+      let found=false;
+      for(const s of [0,1]){
+        const i=T[s].findIndex(u=>u.h<=0);
+        if(i>=0){const u=T[s][i];T[s].splice(i,1);snap(`${A[u.k].e} ${A[u.k].n} fällt`);doFaint(C[s],u,i);flush();found=true;break}
+      }
+      if(!found)break;
+    }
+  };
+  const atkVal=u=>{let d=u.a;if(u.perk==='bone')d+=3;if(u.perk==='steak'){d+=20;u.perk=null}return d};
+
+  snap('Kampfbeginn!');
+  const sob=[...T[0],...T[1]].filter(u=>A[u.k].tr==='sob').sort((x,y)=>y.a-x.a||Math.random()-.5);
+  for(const u of sob)if(u.h>0){fire(C[u.side],u,'sob');flush()}
+  resolve();
+  let turns=0;
+  while(T[0].length&&T[1].length&&turns++<200){
+    fire(C[0],T[0][0],'beforeAtk');fire(C[1],T[1][0],'beforeAtk');flush();resolve();
+    if(!T[0].length||!T[1].length)break;
+    const x=T[0][0],y=T[1][0];
+    const dx=atkVal(x),dy=atkVal(y);
+    lunge=[x.id,y.id];
+    dmg(y,dx);dmg(x,dy);
+    if(x.perk==='chili'&&T[1][1])dmg(T[1][1],5);
+    if(y.perk==='chili'&&T[0][1])dmg(T[0][1],5);
+    snap(`${A[x.k].e} ${A[x.k].n} und ${A[y.k].e} ${A[y.k].n} greifen an`);
+    if(T[0][1]&&T[0][1].h>0)fire(C[0],T[0][1],'aheadAtk',x);
+    if(T[1][1]&&T[1][1].h>0)fire(C[1],T[1][1],'aheadAtk',y);
+    if(y.h<=0&&x.h>0)fire(C[0],x,'ko');
+    if(x.h<=0&&y.h>0)fire(C[1],y,'ko');
+    flush();resolve();
+  }
+  const win=T[0].length&&!T[1].length?0:T[1].length&&!T[0].length?1:-1;
+  snap(win<0?'Unentschieden!':`${G.names[win]} gewinnt!`);
+  return{frames:F,win};
+}
+
+
+/* ---------- Shop-Aktionen ---------- */
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2200)}
+function merge(into,from){
+  into.a=clamp(Math.max(into.a,from.a)+1);into.h=clamp(Math.max(into.h,from.h)+1);
+  into.ta=Math.max(into.ta,from.ta);into.th=Math.max(into.th,from.th);
+  if(!into.perk)into.perk=from.perk;
+  const old=into.lvl;into.xp=Math.min(5,into.xp+from.xp+1);into.lvl=lvlOf(into.xp);return old;
+}
+function afterMerge(P,u,old){
+  if(u.lvl>old){
+    fire(shopCtx(P),u,'levelup',null,old);
+    const t=Math.min(6,tierOf(G.round)+1),nu=newUnit(rand(pool(t,t)));
+    nu.a=clamp(nu.a+P.buffA);nu.h=clamp(nu.h+P.buffH);P.shopPets.push({u:nu,fz:false});
+    toast(`${A[u.k].n} erreicht Level ${u.lvl}! Ein Bonustier der Stufe ${t} liegt im Shop.`);
+  }
+}
+function buyPet(si,i){
+  const P=cur(),it=P.shopPets[si];if(!it)return;
+  if(P.gold<3)return toast('Nicht genug Gold. Ein Tier kostet 3 Gold.');
+  const t=P.team[i],c=shopCtx(P);
+  if(t&&t.k===it.u.k&&t.lvl<3){
+    P.gold-=3;P.shopPets.splice(si,1);
+    const old=merge(t,it.u);fire(c,t,'buy');afterMerge(P,t,old);
+    P.team.slice().forEach(f=>{if(f!==t)fire(c,f,'friendBought',t)});
+  }else{
+    if(P.team.length>=5)return toast('Das Team ist voll. Verkaufe ein Tier oder lege es auf ein gleiches Tier.');
+    P.gold-=3;P.shopPets.splice(si,1);
+    const u=it.u;P.team.splice(Math.min(i,P.team.length),0,u);
+    fire(c,u,'buy');
+    P.team.slice().forEach(f=>{if(f!==u)fire(c,f,'summoned',u)});
+    P.team.slice().forEach(f=>{if(f!==u)fire(c,f,'friendBought',u)});
+  }
+  sel=null;render();
+}
+function feed(si,i){
+  const P=cur(),it=P.shopFoods[si],f=FD[it.k],u=P.team[i];if(!u)return;
+  if(P.gold<f.c)return toast(`Nicht genug Gold. ${f.n} kostet ${f.c} Gold.`);
+  P.gold-=f.c;P.shopFoods.splice(si,1);
+  const c=shopCtx(P);
+  if(f.perk)u.perk=it.k;
+  else if(it.k==='pill'){P.team.splice(i,1);doFaint(c,u,i)}
+  else f.f(c,u);
+  sel=null;render();
+}
+function useAny(){
+  const P=cur();if(!sel||sel.z!=='food')return;
+  const it=P.shopFoods[sel.i],f=FD[it.k];
+  if(!f.any)return;
+  if(P.gold<f.c)return toast(`Nicht genug Gold. ${f.n} kostet ${f.c} Gold.`);
+  if(!P.team.length&&it.k!=='can')return toast('Du brauchst zuerst Tiere im Team.');
+  P.gold-=f.c;P.shopFoods.splice(sel.i,1);f.f(shopCtx(P));sel=null;render();
+}
+function slotClick(i){
+  const P=cur(),t=P.team[i];
+  if(!sel){if(t)sel={z:'team',i};render();return}
+  if(sel.z==='pet')return buyPet(sel.i,i);
+  if(sel.z==='food'){
+    if(t)return feed(sel.i,i);
+    if(FD[P.shopFoods[sel.i].k].any)return useAny();
+    return toast('Tippe auf ein Tier, um es zu füttern.');
+  }
+  if(sel.z==='team'){
+    if(sel.i===i){sel=null;render();return}
+    const s=P.team[sel.i];
+    if(t&&t.k===s.k&&t.lvl<3&&s.lvl<3){const old=merge(t,s);P.team.splice(sel.i,1);afterMerge(P,t,old)}
+    else{P.team.splice(sel.i,1);P.team.splice(Math.min(i,P.team.length),0,s)}
+    sel=null;render();
+  }
+}
+function pickShop(z,i){
+  const P=cur();
+  if(sel&&sel.z===z&&sel.i===i){
+    if(z==='pet')return buyPet(i,P.team.length>=5?4:P.team.length);
+    if(z==='food'&&FD[P.shopFoods[i].k].any)return useAny();
+    sel=null;
+  }else sel={z,i};
+  render();
+}
+function doRoll(){const P=cur();if(P.gold<1)return toast('Kein Gold mehr zum Würfeln.');P.gold--;roll(P);sel=null;render()}
+function doFreeze(){
+  const P=cur();if(!sel)return;
+  const it=sel.z==='pet'?P.shopPets[sel.i]:sel.z==='food'?P.shopFoods[sel.i]:null;
+  if(it){it.fz=!it.fz;toast(it.fz?'Eingefroren: bleibt beim Würfeln und in der nächsten Runde liegen.':'Aufgetaut.')}
+  render();
+}
+function doSell(){
+  const P=cur();if(!sel||sel.z!=='team')return;
+  const u=P.team[sel.i];P.team.splice(sel.i,1);P.gold+=u.lvl;
+  fire(shopCtx(P),u,'sell');
+  toast(`${A[u.k].n} verkauft: +${u.lvl} Gold.`);sel=null;render();
+}
+
+/* ---------- Darstellung ---------- */
+function abil(k,l){const d=A[k];return d.tr?`<span class="trig">${TR[d.tr]}:</span> ${d.d(l)}`:'Keine Fähigkeit.'}
+function tip(u){const d=A[u.k];return `${d.n} Lv${u.lvl} – ${u.a+(u.ta||0)} ATK / ${u.h+(u.th||0)} HP${d.tr?` – ${TR[d.tr]}: ${d.d(u.lvl)}`:''}${u.perk?` – Perk: ${FD[u.perk].n}`:''}`}
+function uHTML(u,o={}){
+  const d=A[u.k],a=u.a+(u.ta||0),h=u.h+(u.th||0);
+  const pips=u.lvl===1?'●'.repeat(u.xp)+'○'.repeat(2-u.xp):u.lvl===2?'●'.repeat(u.xp-2)+'○'.repeat(5-u.xp):'';
+  const hit=o.hits&&o.hits[u.id]!=null?o.hits[u.id]:null;
+  return `<div class="unit${hit!=null?' hit':''}${o.lunge&&o.lunge.includes(u.id)?' lunge':''}" title="${esc(tip(u))}">
+    ${o.lv!==false?`<span class="lv">Lv${u.lvl}${pips?`<i>${pips}</i>`:''}</span>`:''}
+    ${u.perk?`<span class="perk"><span>${FD[u.perk].e}</span></span>`:''}
+    <span class="emo${d.z?' z':''}">${d.e}</span>
+    <span class="st"><b class="atk${u.ta?' tmp':''}">${a}</b><b class="hp${u.th?' tmp':''}">${Math.max(0,h)}</b></span>
+    ${hit!=null?`<span class="dmg${hit===0?' zero':''}">${hit===0?'0':'−'+hit}</span>`:''}
+  </div>`;
+}
+function infoHTML(P){
+  if(sel&&sel.z==='pet'){const u=P.shopPets[sel.i].u,d=A[u.k];
+    const same=P.team.some(t=>t.k===u.k&&t.lvl<3);
+    return `<h3>${d.e} ${d.n}<span class="tag">Stufe ${d.t} · 3 Gold</span></h3><p>${abil(u.k,1)}</p>
+      <p class="hint">Tippe auf einen Platz im Team, um es dort zu kaufen${same?', oder auf das gleiche Tier im Team, um sie zu kombinieren':''}. Nochmal antippen kauft es ans Ende.</p>`}
+  if(sel&&sel.z==='food'){const it=P.shopFoods[sel.i],f=FD[it.k];
+    return `<h3>${f.e} ${f.n}<span class="tag">Stufe ${f.t} · ${f.c} Gold</span></h3><p>${f.d}</p>
+      <p class="hint">${f.any?'Tippe auf „Benutzen“ oder nochmal auf das Futter.':'Tippe auf ein Tier im Team, um es zu füttern.'}</p>`}
+  if(sel&&sel.z==='team'){const u=P.team[sel.i],d=A[u.k];
+    return `<h3>${d.e} ${d.n}<span class="tag">Level ${u.lvl} · Verkauf ${u.lvl} Gold</span></h3><p>${abil(u.k,u.lvl)}</p>
+      ${u.perk?`<p><span class="trig">Perk ${FD[u.perk].e} ${FD[u.perk].n}:</span> ${FD[u.perk].d.replace('Perk: ','')}</p>`:''}
+      <p class="hint">Tippe auf einen anderen Platz zum Verschieben oder auf ein gleiches Tier zum Kombinieren.</p>`}
+  return `<h3>Stelle dein Team auf</h3>
+    <p>Tippe ein Tier im Shop an und dann einen Platz im Team. Das Tier ganz rechts kämpft zuerst. Zwei gleiche Tiere übereinander ergeben ein stärkeres Tier: 3 Exemplare für Level 2, 6 für Level 3.</p>
+    <p class="legend"><b class="a">3</b> Angriff <b class="h">4</b> Lebenspunkte · Am Desktop geht auch Ziehen und Ablegen.</p>`;
+}
+
+/* ---------- Netzwerk (PeerJS, direkt Browser zu Browser) ---------- */
+const PEER_PREFIX='arche-arena-v1-';
+const PEER_OPTS=window.ARCHE_PEER_OPTS||{}; // optional: eigener PeerJS-Server, z. B. {host:'…',port:443,path:'/'}
+const params=new URLSearchParams(location.search);
+let peer=null,conn=null,retryT=null,netNote='',peerOk=false;
+
+function fresh(){return{phase:'menu',role:null,me:0,code:null,uid:0,round:0,names:['',''],mode:'quick',lives:5,target:5,
+  score:[{lives:5,wins:0},{lives:5,wins:0}],P:null,myDone:false,oppDone:false,teams:[null,null],bt:null,nextReady:[false,false],myNext:false,winner:null}}
+function setMode(m){G.mode=m==='classic'?'classic':'quick';G.lives=G.target=G.mode==='quick'?5:10;G.score=[{lives:G.lives,wins:0},{lives:G.lives,wins:0}]}
+function save(){if(!G||!G.code)return;try{localStorage.setItem('arche-'+G.role+'-'+G.code,JSON.stringify(G))}catch(e){}}
+function load(role,code){try{const s=localStorage.getItem('arche-'+role+'-'+code);return s?JSON.parse(s):null}catch(e){return null}}
+const makeCode=()=>Array.from({length:6},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random()*32)]).join('');
+const cleanCode=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,12);
+const shareLink=()=>location.origin+location.pathname+'?join='+G.code;
+const online=()=>!!(conn&&conn.open);
+function note(t){netNote=t;render()}
+function send(m){if(online())conn.send(m)}
+
+function openHost(){
+  peerOk=false;
+  peer=new Peer(PEER_PREFIX+G.code,PEER_OPTS);
+  peer.on('open',()=>{peerOk=true;netNote='';render()});
+  peer.on('connection',c=>{if(conn&&conn!==c)try{conn.close()}catch(e){}bindConn(c)});
+  peer.on('disconnected',()=>setTimeout(()=>{if(peer&&!peer.destroyed&&peer.disconnected)peer.reconnect()},2000));
+  peer.on('error',e=>{
+    if(e.type==='unavailable-id'){peer.destroy();note('Die Spiel-ID ist noch kurz belegt. Neuer Versuch in 3 Sekunden …');setTimeout(openHost,3000)}
+    else if(['network','server-error','socket-error','socket-closed'].includes(e.type))note('Keine Verbindung zum Vermittlungsserver. Prüfe dein Internet, es wird automatisch neu versucht.');
+    else note('Verbindungsfehler: '+e.type);
+  });
+}
+function openGuest(){
+  if(peer&&!peer.destroyed){if(peer.open)connectGuest();return}
+  peer=new Peer(PEER_OPTS);
+  peer.on('open',connectGuest);
+  peer.on('disconnected',()=>setTimeout(()=>{if(peer&&!peer.destroyed&&peer.disconnected)peer.reconnect()},2000));
+  peer.on('error',e=>{
+    if(e.type==='peer-unavailable')note('Das Spiel ist gerade nicht erreichbar. Hat die andere Person die Seite noch offen? Neuer Versuch läuft …');
+    else note('Verbindungsfehler: '+e.type+'. Neuer Versuch läuft …');
+    retry();
+  });
+}
+function connectGuest(){bindConn(peer.connect(PEER_PREFIX+G.code,{reliable:true}))}
+function retry(){clearTimeout(retryT);retryT=setTimeout(()=>{if(!online())openGuest()},4000)}
+function bindConn(c){
+  conn=c;
+  c.on('open',()=>{netNote='';if(G.role==='guest')send({t:'hello',name:G.names[1]});render()});
+  c.on('data',m=>{try{handle(m)}catch(err){console.error(err)}});
+  c.on('close',()=>{if(conn!==c)return;render();if(G.role==='guest')retry()});
+  c.on('error',()=>{});
+}
+
+/* ---------- Nachrichten ---------- */
+function sanitizeTeam(team){
+  if(!Array.isArray(team))return[];
+  return team.slice(0,5).filter(u=>u&&A[u.k]).map((u,i)=>({id:'g'+G.round+'-'+i,k:u.k,a:clamp(+u.a||0),h:Math.max(1,clamp(+u.h||1)),
+    xp:Math.max(0,Math.min(5,+u.xp||0)),lvl:Math.max(1,Math.min(3,+u.lvl||1)),perk:FD[u.perk]&&FD[u.perk].perk?u.perk:null,
+    ta:Math.max(0,Math.min(50,+u.ta||0)),th:Math.max(0,Math.min(50,+u.th||0))}));
+}
+function syncMsg(){return{t:'sync',names:G.names,mode:G.mode,round:G.round,score:G.score,hostDone:G.myDone,
+  guestDone:!!G.teams[1]||!!(G.bt&&G.bt.r===G.round),bt:G.bt&&G.bt.r===G.round?{...G.bt,i:0}:null}}
+function handle(m){
+  if(!m||typeof m!=='object')return;
+  if(G.role==='host'){
+    if(m.t==='hello'){
+      G.names[1]=String(m.name||'Spieler 2').slice(0,16);
+      if(G.phase==='lobby'){send({t:'start',names:G.names,mode:G.mode});beginRound(1);send({t:'round',r:1})}
+      else send(syncMsg());
+      render();
+    }else if(m.t==='team'&&m.r===G.round&&!G.teams[1]&&!(G.bt&&G.bt.r===G.round)){
+      G.teams[1]=sanitizeTeam(m.team);G.oppDone=true;maybeBattle();render();
+    }else if(m.t==='next'&&m.r===G.round){G.nextReady[1]=true;maybeNext()}
+  }else{
+    if(m.t==='start'){G.names=m.names;setMode(m.mode)}
+    else if(m.t==='round')beginRound(m.r);
+    else if(m.t==='oppDone'&&m.r===G.round){G.oppDone=true;render()}
+    else if(m.t==='battle')showBattle(m.bt,m.score);
+    else if(m.t==='sync')applySync(m);
+  }
+}
+function applySync(m){
+  G.names=m.names;G.mode=m.mode;G.lives=G.target=m.mode==='quick'?5:10;G.score=m.score;
+  if(m.bt){if(!(G.bt&&G.bt.r===m.bt.r)){G.round=m.round;showBattle(m.bt,m.score)}else render();return}
+  if(m.round>G.round||G.phase==='joining'||!G.P)beginRound(m.round,true);
+  G.oppDone=m.hostDone;
+  if(G.phase==='wait'&&!m.guestDone)send({t:'team',r:G.round,team:G.P.team});
+  render();
+}
+
+/* ---------- Spielablauf ---------- */
+function createGame(){
+  if(typeof Peer==='undefined')return toast('Die Verbindungsbibliothek fehlt. Lade die Seite neu.');
+  const name=(document.getElementById('myname').value||'').trim().slice(0,16)||'Spieler 1';
+  const mode=document.querySelector('input[name=mode]:checked')?.value||'quick';
+  G=fresh();G.role='host';G.me=0;G.code=makeCode();G.names=[name,''];setMode(mode);G.phase='lobby';
+  try{localStorage.setItem('arche-name',name)}catch(e){}
+  history.replaceState(null,'','?host='+G.code);
+  openHost();render();
+}
+function joinGame(){
+  if(typeof Peer==='undefined')return toast('Die Verbindungsbibliothek fehlt. Lade die Seite neu.');
+  const name=(document.getElementById('myname').value||'').trim().slice(0,16)||'Spieler 2';
+  const code=cleanCode(params.get('join')||document.getElementById('code')?.value);
+  if(!code)return toast('Bitte gib den Spielcode ein.');
+  G=fresh();G.role='guest';G.me=1;G.code=code;G.names=['',name];G.phase='joining';
+  try{localStorage.setItem('arche-name',name)}catch(e){}
+  history.replaceState(null,'','?join='+code);
+  render();openGuest();
+}
+function roll(P){
+  const r=G.round,t=tierOf(r),keys=pool(1,t);
+  P.shopPets=P.shopPets.filter(x=>x.fz);
+  while(P.shopPets.length<petSlots(r)){const u=newUnit(rand(keys));u.a=clamp(u.a+P.buffA);u.h=clamp(u.h+P.buffH);P.shopPets.push({u,fz:false})}
+  P.shopFoods=P.shopFoods.filter(x=>x.fz);
+  while(P.shopFoods.length<foodSlots(r))P.shopFoods.push({k:rand(fpool(t)),fz:false});
+}
+function beginRound(r,force){
+  if(!force&&r<=G.round&&(G.phase==='shop'||G.phase==='wait'))return;
+  if(!G.P)G.P=newPlayer();
+  G.round=r;G.myDone=false;G.oppDone=false;G.myNext=false;G.nextReady=[false,false];G.teams=[null,null];sel=null;
+  const P=G.P;P.gold=10;P.team.forEach(u=>{u.ta=0;u.th=0});roll(P);
+  const c=shopCtx(P);P.team.slice().forEach(u=>fire(c,u,'startTurn'));
+  G.phase='shop';render();window.scrollTo(0,0);
+}
+function endShop(){
+  const P=G.P,c=shopCtx(P);
+  P.team.slice().forEach(u=>fire(c,u,'endTurn'));
+  sel=null;G.myDone=true;G.phase='wait';
+  const team=JSON.parse(JSON.stringify(P.team));
+  if(G.role==='host'){G.teams[0]=team;send({t:'oppDone',r:G.round});maybeBattle()}
+  else send({t:'team',r:G.round,team});
+  render();window.scrollTo(0,0);
+}
+function maybeBattle(){
+  if(!G.teams[0]||!G.teams[1])return;
+  const res=runBattle(G.teams[0],G.teams[1]);
+  const loss=G.mode==='quick'?1:G.round<=2?1:G.round<=4?2:3;
+  if(res.win>=0){G.score[res.win].wins++;G.score[1-res.win].lives=Math.max(0,G.score[1-res.win].lives-loss)}
+  const bt={r:G.round,frames:res.frames,win:res.win,loss,i:0};
+  G.teams=[null,null];G.nextReady=[false,false];
+  send({t:'battle',bt,score:G.score});
+  showBattle(bt,G.score);
+}
+function showBattle(bt,score){
+  G.bt={...bt,i:0};G.score=score;G.phase='battle';G.myNext=false;window.scrollTo(0,0);play();
+}
+function play(){
+  clearTimeout(timer);render();
+  const bt=G.bt;
+  if(G.phase==='battle'&&bt.i<bt.frames.length-1)timer=setTimeout(()=>{bt.i++;play()},780/speed);
+}
+function isOver(){const s=G.score;return s[0].wins>=G.target||s[1].wins>=G.target||s[0].lives<=0||s[1].lives<=0}
+function clickNext(){
+  clearTimeout(timer);
+  if(isOver()){const s=G.score;G.winner=(s[0].wins>=G.target||s[1].lives<=0)?0:1;G.phase='over';render();return}
+  G.myNext=true;
+  if(G.role==='host'){G.nextReady[0]=true;maybeNext()}else send({t:'next',r:G.round});
+  render();
+}
+function maybeNext(){if(G.nextReady[0]&&G.nextReady[1]){const r=G.round+1;beginRound(r);send({t:'round',r})}}
+
+/* ---------- Darstellung (Online) ---------- */
+const opp=()=>1-G.me;
+function scoreHTML(){
+  if(!G.role||G.phase==='menu')return'';
+  const on=online();
+  return `<div class="score">${[0,1].map(i=>`<div class="chip${i===G.me?' on':''}" style="--c:var(--p${i+1})">
+    <span class="dot"></span><span class="nm">${esc(G.names[i]||'…')}${i===G.me?' (du)':''}</span><span title="Leben">❤️ ${G.score[i].lives}</span><span title="Siege">🏆 ${G.score[i].wins}/${G.target}</span></div>`).join('')}
+    <div class="chip net ${on?'ok':'off'}"><span class="dot"></span>${on?'Verbunden':'Getrennt'}</div></div>`;
+}
+function oppStatus(){
+  if(!online())return `<span class="pill off">${esc(G.names[opp()]||'Gegner')} ist gerade nicht verbunden</span>`;
+  return G.oppDone?`<span class="pill ok">${esc(G.names[opp()])} ist fertig ✓</span>`:`<span class="pill">${esc(G.names[opp()])} kauft noch ein …</span>`;
+}
+function shopHTML(){
+  const P=G.P,r=G.round,isPet=sel&&sel.z==='pet',isFood=sel&&sel.z==='food',pc=`--pc:var(--p${G.me+1})`;
+  let slots='';
+  for(let i=0;i<5;i++){
+    const u=P.team[i],s=sel&&sel.z==='team'&&sel.i===i;
+    slots+=u?`<button class="slot${s?' sel':''}" data-act="slot" data-i="${i}" draggable="true" aria-label="${esc(tip(u))}">${uHTML(u)}</button>`
+            :`<button class="slot empty${isPet&&i===P.team.length?' target':''}" data-act="slot" data-i="${i}" aria-label="Freier Platz ${i+1}"></button>`;
+  }
+  const pets=P.shopPets.map((x,i)=>`<button class="item${x.fz?' fz':''}${isPet&&sel.i===i?' sel':''}" data-act="spet" data-i="${i}" draggable="true" aria-label="${esc(tip(x.u))}, 3 Gold${x.fz?', eingefroren':''}">${uHTML(x.u,{lv:false})}<span class="price">3</span></button>`).join('');
+  const foods=P.shopFoods.map((x,i)=>{const f=FD[x.k];return `<button class="item${x.fz?' fz':''}${isFood&&sel.i===i?' sel':''}" data-act="sfood" data-i="${i}" draggable="true" aria-label="${f.n}: ${f.d} ${f.c} Gold" title="${esc(f.n+': '+f.d)}"><div class="unit"><span class="emo">${f.e}</span></div><span class="price">${f.c}</span></button>`}).join('');
+  const shopSel=isPet||isFood,teamSel=sel&&sel.z==='team';
+  const frozen=shopSel&&(isPet?P.shopPets[sel.i]:P.shopFoods[sel.i]).fz;
+  const anyFood=isFood&&FD[P.shopFoods[sel.i].k].any;
+  return `<div class="panel bar" style="${pc}">
+      <div class="res"><span class="coin">${P.gold}</span>Gold</div>
+      <div class="meta">Runde ${r} · Shop bis Stufe ${tierOf(r)}</div>
+      ${oppStatus()}
+    </div>
+    <div class="ground" style="${pc}">
+      <div class="lbl"><span>Hinten</span><span>Dein Team</span><span>Front →</span></div>
+      <div class="team">${slots}</div>
+    </div>
+    <div class="shelf" style="${pc}">
+      <div class="lbl"><span>Shop</span><span>${P.shopPets.length} Tiere · ${P.shopFoods.length} Futter</span></div>
+      <div class="wares">${pets}<span class="sep" aria-hidden="true"></span>${foods}</div>
+    </div>
+    <div class="panel info" style="${pc}">${infoHTML(P)}</div>
+    <div class="dock" style="${pc}">
+      <button class="btn" data-act="roll" ${P.gold<1?'disabled':''}>🎲 Würfeln <span class="k">1 Gold</span></button>
+      ${shopSel?`<button class="btn ice" data-act="freeze">❄ ${frozen?'Auftauen':'Einfrieren'}</button>`:''}
+      ${anyFood?`<button class="btn" data-act="use">Benutzen</button>`:''}
+      ${teamSel?`<button class="btn" data-act="sell">Verkaufen <span class="k">+${P.team[sel.i].lvl} Gold</span></button>`:''}
+      ${sel?`<button class="btn" data-act="cancel">Abbrechen</button>`:''}
+      <span class="grow"></span>
+      <button class="btn go" data-act="end">Fertig ✓</button>
+    </div>`;
+}
+function waitHTML(){
+  const pc=`--pc:var(--p${G.me+1})`;
+  return `<section class="panel cover" style="${pc}">
+    <p class="eyebrow">Runde ${G.round}</p>
+    <h2>Dein Team steht</h2>
+    <div class="ground mini"><div class="team">${G.P.team.map(u=>`<div class="slot">${uHTML(u)}</div>`).join('')||'<p class="empty-note">Kein Tier im Team. Du kämpfst diese Runde mit leeren Händen.</p>'}</div></div>
+    <p>${oppStatus()}</p>
+    <p class="hint">Der Kampf startet automatisch, sobald ${esc(G.names[opp()]||'die andere Person')} auch fertig ist.</p>
+  </section>`;
+}
+function battleHTML(){
+  const bt=G.bt,f=bt.frames[bt.i],done=bt.i>=bt.frames.length-1,me=G.me,o=opp();
+  const side=(arr,cls)=>`<div class="side ${cls}">${arr.map(u=>uHTML(u,{hits:f.hits,lunge:f.lunge})).join('')}</div>`;
+  let res='';
+  if(done){
+    if(bt.win<0)res=`<div class="result draw"><h3>Unentschieden</h3><p>Niemand verliert Leben.</p></div>`;
+    else{const iWin=bt.win===me,L=1-bt.win;
+      res=`<div class="result" style="--rc:var(--p${bt.win+1})"><h3>${iWin?'Du gewinnst die Runde!':esc(G.names[bt.win])+' gewinnt die Runde.'}</h3><p>${iWin?esc(G.names[L]):'Du'} ${iWin?'verliert':'verlierst'} ${bt.loss} Leben. Stand: ${G.score[me].wins} zu ${G.score[o].wins} Siegen.</p></div>`}
+  }
+  const waiting=done&&G.myNext;
+  return `<section class="panel arena">
+    <div class="ahead"><span class="n" style="color:var(--p${me+1})">${esc(G.names[me])}</span><span class="r">Runde ${G.round} · Kampf</span><span class="n" style="color:var(--p${o+1})">${esc(G.names[o])}</span></div>
+    <div class="field">${side(f.t[me],'a')}<span class="vs">VS</span>${side(f.t[o],'b')}</div>
+    <p class="log" aria-live="polite">${esc(f.msg)}</p>
+    ${res}
+    <div class="dock">
+      ${done?`<span class="grow"></span>${waiting?`<span class="pill">Warte auf ${esc(G.names[o])} …</span>`:`<button class="btn go" data-act="next" style="--pc:var(--ink)">${isOver()?'Zum Ergebnis':'Weiter zur nächsten Runde'}</button>`}`
+        :`<button class="btn" data-act="speed">Tempo ${speed}×</button><span class="grow"></span><button class="btn" data-act="skip">Überspringen</button>`}
+    </div>
+  </section>`;
+}
+function menuHTML(){
+  let saved='';try{saved=localStorage.getItem('arche-name')||''}catch(e){}
+  const join=cleanCode(params.get('join'));
+  if(join)return `<section class="panel cover" style="--pc:var(--p2)">
+    <div class="hero-pets" aria-hidden="true">🐜🦦🦔🐘🦒🐊🐉</div>
+    <p class="eyebrow">Einladung · Spiel ${esc(join)}</p>
+    <h2>Du wurdest zur Arche-Arena eingeladen</h2>
+    <p>Gib deinen Namen ein und tritt bei. Ihr kauft gleichzeitig ein, danach kämpfen eure Teams automatisch.</p>
+    <div class="form"><label for="myname">Dein Name<input type="text" id="myname" maxlength="16" value="${esc(saved)}" placeholder="Spieler 2" autocomplete="off"></label></div>
+    <button class="btn go" data-act="join">Beitreten</button>
+  </section>`;
+  return `<section class="panel cover" style="--pc:var(--p1)">
+    <div class="hero-pets" aria-hidden="true">🐜🦦🦔🐘🦒🐊🐉</div>
+    <p class="eyebrow">Auto-Kampf für zwei, online</p>
+    <h2>Stellt eure Arche zusammen</h2>
+    <p>Erstelle ein Spiel und schick den Link an deine Mitspielerin oder deinen Mitspieler. Ihr kauft gleichzeitig ein, dann kämpfen eure Teams automatisch. Kein Konto nötig.</p>
+    <div class="form">
+      <label for="myname">Dein Name<input type="text" id="myname" maxlength="16" value="${esc(saved)}" placeholder="Spieler 1" autocomplete="off"></label>
+      <div class="modes" role="radiogroup" aria-label="Spiellänge">
+        <label for="m-quick"><input type="radio" name="mode" id="m-quick" value="quick" checked> Schnell · 5 Siege, 5 Leben</label>
+        <label for="m-classic"><input type="radio" name="mode" id="m-classic" value="classic"> Klassisch · 10 Siege, 10 Leben</label>
+      </div>
+    </div>
+    <details>
+      <summary>Regeln</summary>
+      <ul class="rules">
+        <li>Jede Runde hat jede Person 10 Gold. Tiere und Futter kosten 3 Gold, die Schlafpille 1, Würfeln 1.</li>
+        <li>Bis zu 5 Tiere im Team. Das vorderste Tier (rechts) kämpft immer zuerst gegen das vorderste gegnerische Tier.</li>
+        <li>Zwei gleiche Tiere aufeinanderlegen: Werte steigen, ab 3 Exemplaren Level 2, ab 6 Level 3. Jeder Levelaufstieg legt ein Bonustier einer höheren Stufe in den Shop.</li>
+        <li>Einfrieren hält ein Angebot im Shop fest. Verkaufen bringt Gold in Höhe des Levels.</li>
+        <li>Alle zwei Runden schaltet der Shop eine neue Stufe frei, bis Stufe 6.</li>
+        <li>Wer einen Kampf verliert, verliert Leben (im klassischen Modus später 2 bis 3). Unentschieden kostet nichts.</li>
+      </ul>
+    </details>
+    <div class="dock"><button class="btn go" data-act="create">Spiel erstellen</button></div>
+    <details>
+      <summary>Ich habe einen Spielcode</summary>
+      <div class="form" style="margin-top:.6em"><label for="code">Spielcode<input type="text" id="code" maxlength="12" autocomplete="off" placeholder="z. B. K7QM2X"></label>
+      <div><button class="btn" data-act="joincode">Mit Code beitreten</button></div></div>
+    </details>
+  </section>`;
+}
+function lobbyHTML(){
+  const link=shareLink();
+  return `<section class="panel cover" style="--pc:var(--p1)">
+    <p class="eyebrow">Spiel ${esc(G.code)} · ${G.mode==='quick'?'Schnell':'Klassisch'}</p>
+    <h2>Warte auf Mitspieler</h2>
+    <p>${peerOk?'Schick diesen Link an die Person, mit der du spielen willst. Lass diese Seite offen, bis ihr fertig seid.':'Verbinde mit dem Vermittlungsserver …'}</p>
+    <div class="linkbox"><input type="text" id="sharelink" value="${esc(link)}" readonly aria-label="Einladungslink"></div>
+    <div class="dock">
+      <button class="btn go" data-act="copy" ${peerOk?'':'disabled'}>Link kopieren</button>
+      ${navigator.share?`<button class="btn" data-act="share" ${peerOk?'':'disabled'}>Teilen …</button>`:''}
+    </div>
+    <p class="hint">Oder Spielcode nennen: <strong class="code">${esc(G.code)}</strong></p>
+  </section>`;
+}
+function joiningHTML(){
+  return `<section class="panel cover" style="--pc:var(--p2)">
+    <p class="eyebrow">Spiel ${esc(G.code)}</p>
+    <h2>Verbinde …</h2>
+    <p>Sobald die Verbindung steht, startet die erste Runde.</p>
+  </section>`;
+}
+function overHTML(){
+  const W=G.winner,L=1-W,iWin=W===G.me;
+  return `<section class="panel cover" style="--pc:var(--p${W+1})">
+    <p class="eyebrow">Spielende nach ${G.round} Runden</p>
+    <h2>${iWin?'Du gewinnst die Arche-Arena!':esc(G.names[W])+' gewinnt die Arche-Arena.'}</h2>
+    ${G.P&&G.P.team.length?`<div class="hero-pets" aria-hidden="true">${G.P.team.map(u=>A[u.k].e).join('')}</div>`:''}
+    <p>${esc(G.names[W])}: ${G.score[W].wins} Siege, ${G.score[W].lives} Leben übrig. ${esc(G.names[L])}: ${G.score[L].wins} Siege, ${G.score[L].lives} Leben übrig.</p>
+    <button class="btn go" data-act="again">Neues Spiel</button>
+  </section>`;
+}
+function render(){
+  const app=document.getElementById('app');
+  const ph=G.phase;
+  const body=ph==='menu'?menuHTML():ph==='lobby'?lobbyHTML():ph==='joining'?joiningHTML():ph==='shop'?shopHTML():ph==='wait'?waitHTML():ph==='battle'?battleHTML():overHTML();
+  const keep=document.activeElement&&document.activeElement.id==='myname'?document.activeElement.value:null;
+  app.innerHTML=`<header class="top"><div class="brand">Arche-Arena<small>online</small></div>${scoreHTML()}</header>
+    ${netNote?`<div class="netnote" role="status">${esc(netNote)}</div>`:''}${body}`;
+  if(keep!==null){const el=document.getElementById('myname');if(el){el.value=keep;el.focus()}}
+  save();
+}
+
+/* ---------- Eingaben ---------- */
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-act]');if(!b||b.disabled)return;
+  const i=+b.dataset.i;
+  const acts={
+    create:createGame,join:joinGame,
+    joincode:()=>{const c=cleanCode(document.getElementById('code').value);if(!c)return toast('Bitte gib den Spielcode ein.');params.set('join',c);joinGame()},
+    copy:()=>{const el=document.getElementById('sharelink');
+      const fb=()=>{el.select();try{document.execCommand('copy');toast('Link kopiert.')}catch(err){toast('Markiere den Link und kopiere ihn von Hand.')}};
+      navigator.clipboard?navigator.clipboard.writeText(el.value).then(()=>toast('Link kopiert.'),fb):fb()},
+    share:()=>navigator.share({title:'Arche-Arena',text:'Spiel mit mir Arche-Arena!',url:shareLink()}).catch(()=>{}),
+    slot:()=>slotClick(i),spet:()=>pickShop('pet',i),sfood:()=>pickShop('food',i),
+    roll:doRoll,freeze:doFreeze,sell:doSell,use:useAny,end:endShop,cancel:()=>{sel=null;render()},
+    speed:()=>{speed=speed>=4?1:speed*2;play()},skip:()=>{G.bt.i=G.bt.frames.length-1;play()},
+    next:clickNext,
+    again:()=>{try{localStorage.removeItem('arche-'+G.role+'-'+G.code)}catch(err){}
+      try{if(peer)peer.destroy()}catch(err){}peer=null;conn=null;location.href=location.pathname}
+  };
+  acts[b.dataset.act]?.();
+});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='myname')document.querySelector('[data-act="create"],[data-act="join"]')?.click()});
+document.addEventListener('dragstart',e=>{
+  const b=e.target.closest&&e.target.closest('[data-act]');if(!b||G.phase!=='shop'){e.preventDefault();return}
+  const act=b.dataset.act,i=+b.dataset.i;
+  if(act==='spet')sel={z:'pet',i};else if(act==='sfood')sel={z:'food',i};
+  else if(act==='slot'&&cur().team[i])sel={z:'team',i};else{e.preventDefault();return}
+  e.dataTransfer.setData('text/plain',act);e.dataTransfer.effectAllowed='move';
+});
+document.addEventListener('dragover',e=>{if(e.target.closest&&e.target.closest('[data-act="slot"]'))e.preventDefault()});
+document.addEventListener('drop',e=>{const b=e.target.closest&&e.target.closest('[data-act="slot"]');if(b&&sel){e.preventDefault();slotClick(+b.dataset.i)}});
+document.addEventListener('dragend',()=>{if(G.phase==='shop')render()});
+
+/* ---------- Start ---------- */
+(function boot(){
+  if(typeof Peer==='undefined'){G=fresh();netNote='Die Verbindungsbibliothek konnte nicht geladen werden. Prüfe deine Internetverbindung und lade die Seite neu.';render();return}
+  const hostCode=cleanCode(params.get('host')),joinCode=cleanCode(params.get('join'));
+  const restored=hostCode?load('host',hostCode):joinCode?load('guest',joinCode):null;
+  if(restored&&restored.phase!=='over'&&restored.phase!=='menu'){
+    G=restored;
+    if(G.role==='host')openHost();else{if(G.phase==='menu')G.phase='joining';openGuest()}
+    if(G.phase==='battle')play();else render();
+    return;
+  }
+  G=fresh();
+  if(hostCode)history.replaceState(null,'',location.pathname);
+  render();
+})();
+
+</script>
+</body>
+</html>
